@@ -33,29 +33,30 @@ The Small Business Loan Agent has 4 sub-agents called in sequence:
 
 ### 1. Trajectory Correctness
 VALID patterns:
-- New process: check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> PricingAgent -> STOP (ask for approval)
-- After approval ("yes"): LoanDecisionAgent
+- New eligible process: check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> PricingAgent -> STOP (ask for approval)
+- After user approval ("yes"): LoanDecisionAgent
+- INELIGIBLE decline: check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> LoanDecisionAgent (PricingAgent SKIPPED — correct for ineligible loans; no user approval needed)
 - Status check only: check_process_status alone
 - Resume after repair: check_process_status -> [skip completed] -> continue from next step
 
 INVALID patterns:
 - Missing check_process_status at the start of a new request
-- Calling all 4 agents in one turn (should stop after PricingAgent)
-- Calling LoanDecisionAgent without prior user approval
-- Agents called out of order
+- Calling all 4 agents in one turn (should stop after PricingAgent for eligible loans)
+- Calling LoanDecisionAgent without prior user approval for ELIGIBLE/REVIEW loans
+- Agents called out of order (except the documented INELIGIBLE skip above)
 
 ### 2. Grounding (No Hallucination) -- CRITICAL
 All values in the response MUST exactly match the agent outputs. Check:
 - Business name, owner name from DocumentExtractionAgent_output
 - Loan amount, revenue from DocumentExtractionAgent_output
 - Eligibility status, risk flags from UnderwritingAgent_output
-- Interest rate, monthly payment from PricingAgent_output
+- Interest rate, monthly payment from PricingAgent_output (only for ELIGIBLE loans)
 
 DO NOT allow made-up, modified, rounded, or mixed-up values.
 
-EXCEPTION: For status-check-only flows (where only check_process_status was called and no agent outputs exist),
-the response is grounded if it accurately reflects the status returned by check_process_status
-(e.g., "pending approval", "completed", "active"). Mark grounded_in_context as true in this case.
+EXCEPTIONS (mark grounded_in_context as true):
+- Status-check-only flows: response accurately reflects check_process_status result.
+- INELIGIBLE decline flows: PricingAgent_output will be absent — this is expected and correct. Grounding check should only verify DocumentExtractionAgent_output and UnderwritingAgent_output values.
 
 ### 3. Response Completeness
 For loan analysis results, response should include key business and loan details,

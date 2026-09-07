@@ -25,50 +25,63 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
     """
     Finalize the loan decision and generate a decision letter reference.
 
-    In production, this would record the decision in Cymbal Bank's loan origination
-    system and trigger generation of official decision letters.
-
-    Args:
-        tool_context: The tool context with access to session state.
-
-    Returns:
-        dict: Final decision details.
+    Handles both approval (ELIGIBLE/REVIEW) and decline (INELIGIBLE) paths.
+    In production this would record in the loan origination system and trigger
+    generation of official letters.
     """
     try:
         loan_request_id = tool_context.state.get("loan_request_id")
-        application_data = tool_context.state.get("DocumentExtractionAgent_output")
+        application_data = tool_context.state.get("DocumentExtractionAgent_output") or {}
+        underwriting_data = tool_context.state.get("UnderwritingAgent_output") or {}
         pricing_data = tool_context.state.get("PricingAgent_output")
 
         if not loan_request_id:
-            return {
-                "status": "error",
-                "message": "loan_request_id not found in session state",
-            }
-
-        if not application_data:
-            return {
-                "status": "error",
-                "message": "Application data not found in session state",
-            }
-
-        if not pricing_data:
-            return {
-                "status": "error",
-                "message": "Pricing data not found in session state",
-            }
+            return {"status": "error", "message": "loan_request_id not found in session state"}
 
         logger.info(f"Finalizing loan decision for: {loan_request_id}")
 
-        # Generate decision letter ID
+        # Normalise: ADK may store output_schema results as Pydantic objects or dicts
+        if hasattr(application_data, "model_dump"):
+            application_data = application_data.model_dump()
+        if hasattr(underwriting_data, "model_dump"):
+            underwriting_data = underwriting_data.model_dump()
+        if hasattr(pricing_data, "model_dump"):
+            pricing_data = pricing_data.model_dump()
+
         decision_letter_id = f"DL-{loan_request_id.replace(f'{config.LOAN_ID_PREFIX}-', '')}-001"
+        business_name = application_data.get("business_name", "Applicant")
+        owner_name = application_data.get("owner_name", "N/A")
+        loan_amount = application_data.get("loan_amount_requested", "N/A")
+        loan_term = application_data.get("loan_term_months", "N/A")
+        eligibility_status = underwriting_data.get("eligibility_status", "UNKNOWN")
 
-        # Extract approved terms from pricing
-        approved_rate = pricing_data.get("interest_rate", "N/A") if isinstance(pricing_data, dict) else "N/A"
-        loan_amount = (
-            application_data.get("loan_amount_requested", "N/A") if isinstance(application_data, dict) else "N/A"
-        )
-        loan_term = application_data.get("loan_term_months", "N/A") if isinstance(application_data, dict) else "N/A"
+        # ── Decline path ────────────────────────────────────────────────────
+        if eligibility_status == "INELIGIBLE":
+            risk_flags = underwriting_data.get("risk_flags") or []
+            matched_rule = underwriting_data.get("matched_rule") or ""
+            decline_reasons = risk_flags if risk_flags else (
+                [matched_rule] if matched_rule else ["Business did not meet eligibility requirements"]
+            )
+            return {
+                "status": "success",
+                "decision": "DENIED",
+                "decision_letter_id": decision_letter_id,
+                "business_name": business_name,
+                "owner_name": owner_name,
+                "loan_amount_requested": loan_amount,
+                "decline_reasons": decline_reasons,
+                "message": (
+                    f"Loan application {loan_request_id} for {business_name} has been DENIED. "
+                    f"Decision letter {decision_letter_id} has been issued. "
+                    f"Decline reason(s): {'; '.join(str(r) for r in decline_reasons)}."
+                ),
+            }
 
+        # ── Approval path ────────────────────────────────────────────────────
+        if not pricing_data:
+            return {"status": "error", "message": "Pricing data not found in session state"}
+
+        approved_rate = pricing_data.get("interest_rate", "N/A")
         return {
             "status": "success",
             "decision": "APPROVED",
@@ -81,7 +94,7 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
                 "Collateral documentation to be submitted before disbursement",
             ],
             "message": (
-                f"Loan {loan_request_id} has been approved. "
+                f"Loan {loan_request_id} for {business_name} has been APPROVED. "
                 f"Decision letter {decision_letter_id} has been generated. "
                 f"Approved for {loan_amount} at {approved_rate} for {loan_term} months."
             ),
