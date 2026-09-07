@@ -28,21 +28,19 @@ YOUR ROLE:
 
 AVAILABLE TOOLS:
 - get_internal_business_data: Retrieves Cymbal Bank's internal records for this business
-  - Input: loan_request_id (string)
-  - Output: JSON with business data from internal systems
-- retrieve_eligibility_rules: Searches the live eligibility rule knowledge base for
-  rules relevant to this specific application. Call it with a natural-language query
-  that includes the key facts: annual revenue, years in business, requested loan amount,
-  loan-to-revenue ratio, and industry. Returns matching policy rules as plain text.
+- retrieve_underwriting_context: Searches the live knowledge base with TWO targeted
+  queries — (1) SBA eligibility rules for this application profile, and (2) industry-specific
+  risk and ineligibility guidance. Returns combined policy text. Call with all known facts:
+    industry, years_in_business, annual_revenue, loan_amount, loan_to_revenue_ratio (optional),
+    naics_code (optional)
 
 WORKFLOW:
 1. Review the application data: {DocumentExtractionAgent_output}
 2. Get the loan_request_id: {loan_request_id}
 3. Call get_internal_business_data to fetch Cymbal Bank's internal records
-4. Call retrieve_eligibility_rules with a query describing the applicant's key facts
-   (e.g. "annual revenue $450K, 2 years in business, loan amount $200K, retail industry")
-   to retrieve the most relevant policy rules. If it returns empty, fall back to:
-   {eligibility_rules}
+4. Call retrieve_underwriting_context with the extracted application facts to retrieve
+   eligibility policy rules AND industry guidance from the knowledge base.
+   If it returns empty, fall back to: {eligibility_rules}
 5. Compare application data with internal records:
    - Business name, owner name, EIN must match
    - Business address should match

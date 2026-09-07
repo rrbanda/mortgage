@@ -17,6 +17,7 @@
 from google.adk.tools.tool_context import ToolContext
 from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
+from small_business_loan_agent.shared_libraries.rag_tools import retrieve_regulatory_guidance
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,14 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
             decline_reasons = risk_flags if risk_flags else (
                 [matched_rule] if matched_rule else ["Business did not meet eligibility requirements"]
             )
+
+            # Retrieve ECOA/Reg B guidance from AutoRAG to ground the decline letter
+            # in actual regulatory requirements (specific reason codes, notice elements)
+            regulatory_guidance = retrieve_regulatory_guidance(
+                risk_flags=risk_flags,
+                eligibility_status=eligibility_status,
+            )
+
             return {
                 "status": "success",
                 "decision": "DENIED",
@@ -70,6 +79,7 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
                 "owner_name": owner_name,
                 "loan_amount_requested": loan_amount,
                 "decline_reasons": decline_reasons,
+                "regulatory_guidance": regulatory_guidance,
                 "message": (
                     f"Loan application {loan_request_id} for {business_name} has been DENIED. "
                     f"Decision letter {decision_letter_id} has been issued. "

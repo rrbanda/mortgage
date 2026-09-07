@@ -12,50 +12,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""RAG retrieval tools for the Underwriting Agent.
+"""RAG retrieval entry points for the Underwriting Agent.
 
-Uses the AutoRAG OGX vector store to retrieve eligibility rules relevant
-to a specific loan application, replacing static JSON file lookup when
-AUTORAG_BASE_URL and AUTORAG_VECTOR_STORE_ID are configured.
+Delegates to the shared rag_tools library and combines two targeted
+queries — eligibility policy and industry guidance — into a single
+structured context block the UnderwritingAgent LLM can consume.
 """
 
-import httpx
-
-from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
+from small_business_loan_agent.shared_libraries.rag_tools import (
+    retrieve_eligibility_rules,
+    retrieve_industry_guidance,
+)
 
 logger = get_logger(__name__)
 
 
-def retrieve_eligibility_rules(query: str) -> str:
-    """Search the eligibility rule knowledge base for rules relevant to this loan application.
+def retrieve_underwriting_context(
+    industry: str,
+    years_in_business: str,
+    annual_revenue: str,
+    loan_amount: str,
+    loan_to_revenue_ratio: str = "",
+    naics_code: str = "",
+) -> str:
+    """Retrieve all AutoRAG context needed for underwriting a loan application.
 
-    Args:
-        query: A natural-language description of the loan scenario — include key
-               facts such as annual revenue, years in business, loan amount,
-               loan-to-revenue ratio, and industry. The more context, the better
-               the retrieval quality.
+    Executes two targeted searches:
+      1. SBA eligibility rules matching this application profile
+      2. Industry-specific risk and ineligibility guidance
 
-    Returns:
-        Retrieved policy rules as plain text, or an empty string if AutoRAG is
-        not configured (caller falls back to the static rules already in session state).
+    Returns a combined context block ready to append to the underwriting prompt.
+    Empty string when AutoRAG is not configured (caller uses static rules).
     """
-    if not config.using_autorag():
+    eligibility_text = retrieve_eligibility_rules(
+        industry=industry,
+        years_in_business=years_in_business,
+        annual_revenue=annual_revenue,
+        loan_amount=loan_amount,
+        loan_to_revenue_ratio=loan_to_revenue_ratio,
+    )
+
+    industry_text = retrieve_industry_guidance(
+        industry=industry,
+        naics_code=naics_code,
+    )
+
+    if not eligibility_text and not industry_text:
         logger.info("AutoRAG not configured — using static eligibility rules from session state")
         return ""
 
-    logger.info(f"Retrieving eligibility rules from AutoRAG (VS: {config.AUTORAG_VECTOR_STORE_ID[:8]}…)")
-    resp = httpx.post(
-        f"{config.AUTORAG_BASE_URL}/v1/vector_stores/{config.AUTORAG_VECTOR_STORE_ID}/search",
-        json={"query": query, "max_num_results": 5},
-        verify=config.AUTORAG_SSL_VERIFY,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    chunks = resp.json().get("data", [])
-    logger.info(f"AutoRAG returned {len(chunks)} rule chunk(s) for query: {query[:60]!r}")
-    return "\n\n".join(
-        c["content"][0]["text"]
-        for c in chunks
-        if c.get("content")
-    )
+    parts = []
+    if eligibility_text:
+        parts.append("## Eligibility Policy Rules (AutoRAG)\n\n" + eligibility_text)
+    if industry_text:
+        parts.append("## Industry Risk Guidance (AutoRAG)\n\n" + industry_text)
+
+    combined = "\n\n---\n\n".join(parts)
+    logger.info(f"AutoRAG underwriting context: {len(combined)} chars from {len(parts)} retrieval(s)")
+    return combined
