@@ -165,9 +165,7 @@ async def _stream_completion(
         role="user", parts=[types.Part.from_text(text=user_content)]
     )
 
-    # Track whether we have opened a <think> block for tool-call visibility.
-    # Open WebUI renders <think>…</think> as a collapsible "Reasoning" section.
-    in_think = False
+    tool_calls_emitted = 0
     try:
         async for event in _runner.run_async(
             user_id=USER_ID,
@@ -178,22 +176,20 @@ async def _stream_completion(
                 continue
             for part in event.content.parts:
                 if part.function_call:
-                    if not in_think:
-                        yield sse({"content": "<think>\n"})
-                        in_think = True
                     args = dict(part.function_call.args or {})
-                    args_str = json.dumps(args, indent=2) if args else "{}"
-                    yield sse({"content": f"▶ **{part.function_call.name}**\n```json\n{args_str}\n```\n"})
+                    args_str = json.dumps(args) if args else ""
+                    line = f"> ⚙️ **{part.function_call.name}**"
+                    if args_str and args_str != "{}":
+                        line += f" `{args_str}`"
+                    yield sse({"content": line + "\n\n"})
+                    tool_calls_emitted += 1
                 elif part.text and (event.content.role or "") == "model":
-                    if in_think:
-                        yield sse({"content": "</think>\n\n"})
-                        in_think = False
+                    if tool_calls_emitted:
+                        yield sse({"content": "---\n\n"})
+                        tool_calls_emitted = 0
                     yield sse({"content": part.text})
     except Exception:
         logger.exception("Error in streaming agent run")
-
-    if in_think:
-        yield sse({"content": "</think>\n\n"})
 
     yield sse({}, finish_reason="stop")
     yield "data: [DONE]\n\n"
