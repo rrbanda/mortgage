@@ -22,6 +22,9 @@ AUTORAG_BASE_URL and AUTORAG_VECTOR_STORE_ID are configured.
 import httpx
 
 from small_business_loan_agent import config
+from small_business_loan_agent.shared_libraries.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def retrieve_eligibility_rules(query: str) -> str:
@@ -38,8 +41,10 @@ def retrieve_eligibility_rules(query: str) -> str:
         not configured (caller falls back to the static rules already in session state).
     """
     if not config.using_autorag():
+        logger.info("AutoRAG not configured — using static eligibility rules from session state")
         return ""
 
+    logger.info(f"Retrieving eligibility rules from AutoRAG (VS: {config.AUTORAG_VECTOR_STORE_ID[:8]}…)")
     resp = httpx.post(
         f"{config.AUTORAG_BASE_URL}/v1/vector_stores/{config.AUTORAG_VECTOR_STORE_ID}/search",
         json={"query": query, "max_num_results": 5},
@@ -48,6 +53,7 @@ def retrieve_eligibility_rules(query: str) -> str:
     )
     resp.raise_for_status()
     chunks = resp.json().get("data", [])
+    logger.info(f"AutoRAG returned {len(chunks)} rule chunk(s) for query: {query[:60]!r}")
     return "\n\n".join(
         c["content"][0]["text"]
         for c in chunks
