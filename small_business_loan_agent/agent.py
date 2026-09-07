@@ -23,10 +23,13 @@ Orchestrator-based agent architecture with 4 specialized sub-agents:
 """
 
 import os
+from pathlib import Path
 
 from google.adk.agents import LlmAgent
 from google.adk.apps import App
+from google.adk.skills import load_skills_from_dir
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools.skill_toolset import SkillToolset
 
 from small_business_loan_agent.callbacks import (
     before_tool_callback_check_process_status,
@@ -47,6 +50,12 @@ from small_business_loan_agent.tools.tools import check_process_status
 # --- Constants ---
 MODEL_NAME = DEFAULT_MODEL_NAME
 
+# --- Agent Skills ---
+# Skills directory lives at the repo root (one level above this package).
+# Each subdirectory is a SKILL.md artifact the LLM can load on demand.
+_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+_skill_toolset = SkillToolset(skills=load_skills_from_dir(_SKILLS_DIR))
+
 # --- Root Orchestrator Agent ---
 root_agent = LlmAgent(
     name="SmallBusinessLoanOrchestratorAgent",
@@ -57,6 +66,7 @@ root_agent = LlmAgent(
     before_tool_callback=before_tool_callback_check_process_status,
     after_agent_callback=llm_judge_gate,
     tools=[
+        _skill_toolset,                    # skills first — LLM discovers domain knowledge before acting
         check_process_status,
         AgentTool(document_extraction_agent),
         AgentTool(underwriting_agent),

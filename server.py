@@ -218,6 +218,27 @@ async def v1_chat_completions(request: ChatCompletionRequest):
     return await _run_completion(request, session_id)
 
 
+@app.get("/.well-known/agent-card.json")
+async def agent_card() -> dict:
+    """A2A Agent Card — capability discovery endpoint (RFC 8615 well-known URI)."""
+    import warnings
+    from google.protobuf.json_format import MessageToDict
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from google.adk.a2a.utils.agent_card_builder import AgentCardBuilder
+    agent_host = os.getenv("AGENT_HOST", "localhost")
+    agent_version = os.getenv("AGENT_VERSION", "1.0.0")
+    builder = AgentCardBuilder(
+        agent=root_agent,
+        rpc_url=f"https://{agent_host}/a2a",
+        agent_version=agent_version,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        card = await builder.build()
+    return MessageToDict(card, preserving_proto_field_name=True)
+
+
 @app.get("/health")
 async def health() -> dict:
     initialized = _runner is not None

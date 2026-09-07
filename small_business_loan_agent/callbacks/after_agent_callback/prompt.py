@@ -38,6 +38,7 @@ VALID patterns:
 - INELIGIBLE decline: check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> LoanDecisionAgent (PricingAgent SKIPPED — correct for ineligible loans; no user approval needed)
 - Status check only: check_process_status alone
 - Resume after repair: check_process_status -> [skip completed] -> continue from next step
+- Skill loading at any point: list_skills, load_skill, load_skill_resource — valid before, after, or between any step; do NOT flag these as invalid
 
 INVALID patterns:
 - Missing check_process_status at the start of a new request
