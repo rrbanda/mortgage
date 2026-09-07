@@ -37,7 +37,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -71,6 +71,8 @@ app = FastAPI(
     description="OpenAI-compatible API for the ADK-based small business loan processing agent.",
     lifespan=lifespan,
 )
+
+v1 = APIRouter(prefix="/v1")
 
 
 # ── Request / response models ────────────────────────────────────────────────
@@ -120,6 +122,20 @@ def _last_user_content(messages: list[ChatMessage]) -> str:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
+@v1.get("/models")
+async def list_models() -> dict:
+    model_id = os.getenv("MODEL_NAME", "loan-agent")
+    return {
+        "object": "list",
+        "data": [{"id": model_id, "object": "model", "owned_by": "loan-agent"}],
+    }
+
+
+@v1.post("/chat/completions", response_model=ChatCompletionResponse)
+async def v1_chat_completions(request: ChatCompletionRequest) -> dict:
+    return await chat_completions(request)
+
 
 @app.get("/health")
 async def health() -> dict:
@@ -207,6 +223,9 @@ async def chat_completions(request: ChatCompletionRequest) -> dict:
         "session_id": session_id,
         "context": context_messages,
     }
+
+
+app.include_router(v1)
 
 
 if __name__ == "__main__":
