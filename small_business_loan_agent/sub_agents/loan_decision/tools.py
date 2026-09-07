@@ -15,6 +15,7 @@
 """Tools for the Loan Decision Agent — mock decision finalization."""
 
 from google.adk.tools.tool_context import ToolContext
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -59,7 +60,7 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
         logger.info(f"Finalizing loan decision for: {loan_request_id}")
 
         # Generate decision letter ID
-        decision_letter_id = f"DL-{loan_request_id.replace('SBL-', '')}-001"
+        decision_letter_id = f"DL-{loan_request_id.replace(f'{config.LOAN_ID_PREFIX}-', '')}-001"
 
         # Extract approved terms from pricing
         approved_rate = pricing_data.get("interest_rate", "N/A") if isinstance(pricing_data, dict) else "N/A"
@@ -76,7 +77,7 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
             "approved_rate": approved_rate,
             "approved_term": f"{loan_term} months" if loan_term != "N/A" else "N/A",
             "conditions": [
-                "Business insurance verification required within 30 days",
+                f"Business insurance verification required within {config.INSURANCE_VERIFICATION_DAYS} days",
                 "Collateral documentation to be submitted before disbursement",
             ],
             "message": (

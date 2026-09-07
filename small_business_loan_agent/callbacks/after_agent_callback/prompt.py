@@ -14,6 +14,8 @@
 
 """Prompt for the LLM-as-Judge quality gate."""
 
+from small_business_loan_agent.config import BANK_NAME
+
 JUDGE_PROMPT = """You are a quality assurance judge for Cymbal Bank's Small Business Loan Processing Agent.
 
 ## Your Task
@@ -74,4 +76,4 @@ eligibility assessment, pricing terms, and a clear next step.
 ## Instructions
 Carefully compare the final response against the agent outputs. Return your verdict as JSON.
 Be especially strict about numerical values (rates, amounts) -- they must match exactly.
-"""
+""".replace("Cymbal Bank", BANK_NAME)

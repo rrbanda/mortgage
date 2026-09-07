@@ -1,0 +1,42 @@
+# Secrets and credentials — never commit
+.env
+*.env.*
+
+# Local database
+*.db
+*.sqlite
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# uv / pip build artifacts
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv cache
+.uv/
+uv-lock.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml

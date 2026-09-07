@@ -17,8 +17,9 @@
 import os
 
 from google.adk.agents import LlmAgent
-from google.genai.types import GenerateContentConfig, HttpOptions, HttpRetryOptions
-from small_business_loan_agent.gemini_custom import GeminiPreview
+
+from small_business_loan_agent.config import DEFAULT_MODEL_NAME
+from small_business_loan_agent.gemini_custom import get_model
 from small_business_loan_agent.shared_libraries.state_utils.state_callbacks import (
     after_agent_callback_with_state_logging,
     before_agent_callback_with_state_check,
@@ -27,16 +28,11 @@ from small_business_loan_agent.sub_agents.pricing.models import PricingResult
 from small_business_loan_agent.sub_agents.pricing.prompt import PRICING_PROMPT
 from small_business_loan_agent.sub_agents.pricing.tools import calculate_loan_pricing
 
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+MODEL_NAME = DEFAULT_MODEL_NAME
 
 pricing_agent = LlmAgent(
     name="PricingAgent",
-    model=GeminiPreview(model=MODEL_NAME),
-    generate_content_config=GenerateContentConfig(
-        http_options=HttpOptions(
-            retry_options=HttpRetryOptions(initial_delay=1, attempts=2),
-        ),
-    ),
+    model=get_model(MODEL_NAME),
     instruction=PRICING_PROMPT,
     description="Calculates interest rate and payment terms based on risk assessment",
     before_agent_callback=before_agent_callback_with_state_check,

@@ -21,9 +21,8 @@ before agent execution, and enable resume capability after human intervention.
 
 import json
 
-from pathlib import Path
-
 from google.adk.agents.callback_context import CallbackContext
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.state_utils.state_service import (
     ProcessStateService,
 )
@@ -31,12 +30,7 @@ from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-AGENT_OUTPUT_KEY_MAP = {
-    "DocumentExtractionAgent": "DocumentExtractionAgent_output",
-    "UnderwritingAgent": "UnderwritingAgent_output",
-    "PricingAgent": "PricingAgent_output",
-    "LoanDecisionAgent": "LoanDecisionAgent_output",
-}
+AGENT_OUTPUT_KEY_MAP = config.AGENT_OUTPUT_KEY_MAP
 
 
 def _get_agent_name(callback_context: CallbackContext) -> str:
@@ -91,9 +85,14 @@ async def before_agent_callback_with_state_check(
         logger.info(f"Loaded process state for {agent_name}")
 
     if agent_name == "UnderwritingAgent" and "eligibility_rules" not in callback_context.state:
-        rules_path = Path(__file__).parent.parent.parent / "sub_agents" / "underwriting" / "eligibility_rules.json"
-        with open(rules_path) as f:
-            callback_context.state["eligibility_rules"] = json.dumps(json.load(f))
+        if config.using_autorag():
+            # Rules are retrieved live via retrieve_eligibility_rules(); placeholder keeps the template valid.
+            callback_context.state["eligibility_rules"] = (
+                "Use the retrieve_eligibility_rules tool to look up the relevant rules for this application."
+            )
+        else:
+            with open(config.ELIGIBILITY_RULES_PATH) as f:
+                callback_context.state["eligibility_rules"] = json.dumps(json.load(f))
 
 
 def _check_for_issues(agent_name: str, output_data) -> tuple[bool, str, list]:

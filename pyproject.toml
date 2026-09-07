@@ -1,5 +1,5 @@
 [project]
-name = "mortgage-loan-agent"
+name = "small-business-loan-agent"
 version = "0.1.0"
 description = "A multi-agent system that automates mortgage loan processing with human-in-the-loop approval and repair & resume support. Runs locally with a Gemini API key and SQLite state."
 readme = "README.md"
@@ -8,6 +8,7 @@ license = "Apache-2.0"
 dependencies = [
     "google-adk>=1.31.0",
     "reportlab>=4.4.10",
+    "rh-maas-litellm",
 ]
 
 [dependency-groups]
@@ -21,6 +22,10 @@ dev = [
 ]
 
 [project.optional-dependencies]
+server = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
 lint = [
     "ruff>=0.9.0",
 ]
@@ -52,3 +57,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = ""
+
+[tool.uv.sources]
+rh-maas-litellm = { git = "https://github.com/rrbanda/rh-maas-litellm.git" }

@@ -21,28 +21,22 @@ Validates agent responses before they are shown to users by checking:
 3. Response quality — Is the response complete and actionable?
 """
 
-import os
 import json
-
 from typing import Any
 
+import litellm
 from google.adk.agents.callback_context import CallbackContext
-from google.genai import Client, types as genai_types
-from google.genai.types import GenerateContentConfig
+from google.genai import types as genai_types
+from small_business_loan_agent import config
 from small_business_loan_agent.callbacks.after_agent_callback.models import JudgeVerdict
 from small_business_loan_agent.callbacks.after_agent_callback.prompt import JUDGE_PROMPT
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-JUDGE_MODEL = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+JUDGE_MODEL = config.DEFAULT_MODEL_NAME
 
-AGENT_OUTPUT_KEYS = [
-    "DocumentExtractionAgent_output",
-    "UnderwritingAgent_output",
-    "PricingAgent_output",
-    "LoanDecisionAgent_output",
-]
+AGENT_OUTPUT_KEYS = list(config.AGENT_OUTPUT_KEY_MAP.values())
 
 
 def _parse_event_parts(event: Any) -> tuple[list[str], str | None, str | None]:
@@ -119,6 +113,26 @@ def _collect_agent_outputs(callback_context: CallbackContext) -> dict:
     return agent_outputs
 
 
+def _build_judge_client_kwargs() -> dict:
+    """Build litellm kwargs for the judge model call."""
+    model_name = config.DEFAULT_MODEL_NAME
+
+    if config.using_maas():
+        return {
+            "model": f"openai/{model_name}",
+            "api_base": config.maas_api_base(model_name),
+            "api_key": config._maas_key(),
+            "drop_params": True,
+        }
+
+    import os
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if api_key:
+        return {"model": f"openai/{model_name}", "api_key": api_key}
+
+    return {"model": model_name}
+
+
 async def llm_judge_gate(
     callback_context: CallbackContext,
 ) -> genai_types.Content | None:
@@ -143,21 +157,14 @@ async def llm_judge_gate(
             final_response=final_response or "No response",
         )
 
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if api_key:
-            client = Client(api_key=api_key)
-        else:
-            client = Client(project=os.getenv("GOOGLE_CLOUD_PROJECT"), location="global")
-        judge_response = await client.aio.models.generate_content(
-            model=JUDGE_MODEL,
-            contents=judge_input,
-            config=GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=JudgeVerdict,
-            ),
+        client_kwargs = _build_judge_client_kwargs()
+        judge_response = await litellm.acompletion(
+            messages=[{"role": "user", "content": judge_input}],
+            response_format=JudgeVerdict,
+            **client_kwargs,
         )
 
-        verdict_text = judge_response.text or ""
+        verdict_text = judge_response.choices[0].message.content or ""
         verdict = JudgeVerdict.model_validate_json(verdict_text)
 
         log_msg = (

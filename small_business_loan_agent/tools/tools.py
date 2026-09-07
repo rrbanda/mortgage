@@ -15,6 +15,7 @@
 """Orchestrator-level tools."""
 
 from google.adk.tools.tool_context import ToolContext
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.state_utils.state_service import (
     ProcessStateService,
 )
@@ -22,12 +23,7 @@ from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-OUTPUT_KEY_MAP = {
-    "DocumentExtractionAgent": "DocumentExtractionAgent_output",
-    "UnderwritingAgent": "UnderwritingAgent_output",
-    "PricingAgent": "PricingAgent_output",
-    "LoanDecisionAgent": "LoanDecisionAgent_output",
-}
+OUTPUT_KEY_MAP = config.AGENT_OUTPUT_KEY_MAP
 
 
 def determine_process_action(process_state: dict) -> dict:

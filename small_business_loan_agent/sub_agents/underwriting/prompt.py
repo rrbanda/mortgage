@@ -14,6 +14,8 @@
 
 """Prompt for the Underwriting Agent."""
 
+from small_business_loan_agent.config import BANK_NAME
+
 UNDERWRITING_PROMPT = """You are an underwriting specialist for small business loan processing.
 
 CONTEXT:
@@ -28,16 +30,24 @@ AVAILABLE TOOLS:
 - get_internal_business_data: Retrieves Cymbal Bank's internal records for this business
   - Input: loan_request_id (string)
   - Output: JSON with business data from internal systems
+- retrieve_eligibility_rules: Searches the live eligibility rule knowledge base for
+  rules relevant to this specific application. Call it with a natural-language query
+  that includes the key facts: annual revenue, years in business, requested loan amount,
+  loan-to-revenue ratio, and industry. Returns matching policy rules as plain text.
 
 WORKFLOW:
 1. Review the application data: {DocumentExtractionAgent_output}
 2. Get the loan_request_id: {loan_request_id}
 3. Call get_internal_business_data to fetch Cymbal Bank's internal records
-4. Compare application data with internal records:
+4. Call retrieve_eligibility_rules with a query describing the applicant's key facts
+   (e.g. "annual revenue $450K, 2 years in business, loan amount $200K, retail industry")
+   to retrieve the most relevant policy rules. If it returns empty, fall back to:
+   {eligibility_rules}
+5. Compare application data with internal records:
    - Business name, owner name, EIN must match
    - Business address should match
    - Revenue and years in business are compared
-5. Check eligibility rules: {eligibility_rules}
+6. Check eligibility against the retrieved rules:
    - Evaluate revenue thresholds, years in business, loan-to-revenue ratio
    - Determine eligibility: ELIGIBLE, INELIGIBLE, or REVIEW
 
@@ -54,4 +64,4 @@ Provide an UnderwritingReport with:
 4. matched_rule: which eligibility rule determined the outcome
 5. risk_flags: any concerns identified
 6. summary and recommendation
-"""
+""".replace("Cymbal Bank", BANK_NAME)

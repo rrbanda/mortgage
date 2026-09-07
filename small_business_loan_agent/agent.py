@@ -22,26 +22,19 @@ Orchestrator-based agent architecture with 4 specialized sub-agents:
   4. LoanDecisionAgent - Finalizes decision after human approval
 """
 
-from small_business_loan_agent.gemini_custom import GeminiPreview
 import os
 
 from google.adk.agents import LlmAgent
-import os
-
 from google.adk.apps import App
-import os
-
-from google.adk.planners import BuiltInPlanner
-import os
-
 from google.adk.tools.agent_tool import AgentTool
-from google.genai.types import ThinkingConfig, GenerateContentConfig, HttpOptions, HttpRetryOptions
 
 from small_business_loan_agent.callbacks import (
     before_tool_callback_check_process_status,
     extract_request_id_from_request,
     llm_judge_gate,
 )
+from small_business_loan_agent.config import DEFAULT_MODEL_NAME
+from small_business_loan_agent.gemini_custom import get_model
 from small_business_loan_agent.prompt import ORCHESTRATOR_PROMPT
 from small_business_loan_agent.sub_agents.document_extraction import (
     document_extraction_agent,
@@ -52,20 +45,14 @@ from small_business_loan_agent.sub_agents.underwriting import underwriting_agent
 from small_business_loan_agent.tools.tools import check_process_status
 
 # --- Constants ---
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+MODEL_NAME = DEFAULT_MODEL_NAME
 
 # --- Root Orchestrator Agent ---
 root_agent = LlmAgent(
     name="SmallBusinessLoanOrchestratorAgent",
-    model=GeminiPreview(model=MODEL_NAME),
-    generate_content_config=GenerateContentConfig(
-        http_options=HttpOptions(
-            retry_options=HttpRetryOptions(initial_delay=1, attempts=2),
-        ),
-    ),
+    model=get_model(MODEL_NAME),
     instruction=ORCHESTRATOR_PROMPT,
     description="Orchestrates small business loan processing by coordinating sub-agents, handling user approval, and managing the complete application workflow",
-    planner=BuiltInPlanner(thinking_config=ThinkingConfig(include_thoughts=False)),
     before_agent_callback=extract_request_id_from_request,
     before_tool_callback=before_tool_callback_check_process_status,
     after_agent_callback=llm_judge_gate,

@@ -17,6 +17,7 @@
 import re
 
 from google.adk.tools.tool_context import ToolContext
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -44,13 +45,13 @@ def _determine_risk_tier(underwriting_output: dict) -> tuple[str, float]:
     risk_flags = underwriting_output.get("risk_flags", [])
 
     if eligibility == "ELIGIBLE" and len(risk_flags) == 0:
-        return "Tier 1 - Low Risk", 6.50
+        return "Tier 1 - Low Risk", config.RATE_TIER_1
     elif eligibility == "ELIGIBLE":
-        return "Tier 2 - Moderate Risk", 7.75
+        return "Tier 2 - Moderate Risk", config.RATE_TIER_2
     elif eligibility == "REVIEW":
-        return "Tier 3 - Elevated Risk", 9.25
+        return "Tier 3 - Elevated Risk", config.RATE_TIER_3
     else:
-        return "Tier 4 - High Risk", 11.00
+        return "Tier 4 - High Risk", config.RATE_TIER_4
 
 
 def calculate_loan_pricing(tool_context: ToolContext) -> dict:
@@ -87,11 +88,11 @@ def calculate_loan_pricing(tool_context: ToolContext) -> dict:
 
         # Parse loan details
         loan_amount = _parse_dollar_amount(application_data.get("loan_amount_requested", "0"))
-        term_months_str = application_data.get("loan_term_months", "60")
+        term_months_str = application_data.get("loan_term_months", str(config.DEFAULT_LOAN_TERM_MONTHS))
         try:
-            term_months = int(re.sub(r"[^\d]", "", term_months_str)) if term_months_str else 60
+            term_months = int(re.sub(r"[^\d]", "", term_months_str)) if term_months_str else config.DEFAULT_LOAN_TERM_MONTHS
         except ValueError:
-            term_months = 60
+            term_months = config.DEFAULT_LOAN_TERM_MONTHS
 
         if loan_amount <= 0:
             return {"status": "error", "message": "Invalid loan amount"}

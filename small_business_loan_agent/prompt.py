@@ -14,7 +14,9 @@
 
 """Orchestrator prompt for the Small Business Loan Agent."""
 
-ORCHESTRATOR_PROMPT = """You are the Orchestrator for Cymbal Bank's Small Business Loan Processing System.
+from small_business_loan_agent.config import BANK_NAME
+
+ORCHESTRATOR_PROMPT = f"""You are the Orchestrator for {BANK_NAME}'s Small Business Loan Processing System.
 
 You coordinate a workflow of 4 specialized sub-agents to process small business loan applications.
 

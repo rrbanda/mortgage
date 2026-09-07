@@ -16,6 +16,7 @@
 
 import re
 
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -37,18 +38,19 @@ def extract_request_id_from_text(text: str) -> str:
     if not text:
         raise ValueError("No text provided to extract request ID from")
 
-    match = re.search(r"SBL-\d{4}-\d{5}", text)
+    match = re.search(config.LOAN_ID_REGEX, text)
 
     if match:
         request_id = match.group(0)
         logger.info(f"Extracted loan_request_id: {request_id}")
         return request_id
     else:
+        pfx = config.LOAN_ID_PREFIX
         raise ValueError(
-            "No loan_request_id found in message. "
-            "Please provide an ID in the format SBL-YYYY-XXXXX (e.g., SBL-2025-00142).\n"
+            f"No loan_request_id found in message. "
+            f"Please provide an ID in the format {pfx}-YYYY-XXXXX (e.g., {pfx}-2025-00142).\n"
             "Examples:\n"
-            '  - "Process this application for SBL-2025-00142"\n'
-            '  - "What is the status on SBL-2025-00142?"\n'
-            '  - "Resume processing for SBL-2025-00142"'
+            f'  - "Process this application for {pfx}-2025-00142"\n'
+            f'  - "What is the status on {pfx}-2025-00142?"\n'
+            f'  - "Resume processing for {pfx}-2025-00142"'
         )

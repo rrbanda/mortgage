@@ -17,8 +17,9 @@
 import os
 
 from google.adk.agents import LlmAgent
-from google.genai.types import GenerateContentConfig, HttpOptions, HttpRetryOptions
-from small_business_loan_agent.gemini_custom import GeminiPreview
+
+from small_business_loan_agent.config import DEFAULT_MODEL_NAME
+from small_business_loan_agent.gemini_custom import get_model
 from small_business_loan_agent.shared_libraries.state_utils.state_callbacks import (
     after_agent_callback_with_state_logging,
     before_agent_callback_with_state_check,
@@ -31,16 +32,11 @@ from small_business_loan_agent.sub_agents.loan_decision.tools import (
     finalize_loan_decision,
 )
 
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.0-flash")
+MODEL_NAME = DEFAULT_MODEL_NAME
 
 loan_decision_agent = LlmAgent(
     name="LoanDecisionAgent",
-    model=GeminiPreview(model=MODEL_NAME),
-    generate_content_config=GenerateContentConfig(
-        http_options=HttpOptions(
-            retry_options=HttpRetryOptions(initial_delay=1, attempts=2),
-        ),
-    ),
+    model=get_model(MODEL_NAME),
     instruction=LOAN_DECISION_PROMPT,
     description="Finalizes the loan decision and generates a decision letter after human approval",
     before_agent_callback=before_agent_callback_with_state_check,

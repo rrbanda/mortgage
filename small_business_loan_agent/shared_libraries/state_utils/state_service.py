@@ -28,11 +28,10 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-DEFAULT_DB_PATH = "./mortgage_agent_state.db"
 
 
 def _now_iso() -> str:
@@ -82,7 +81,7 @@ class ProcessStateService:
     OVERALL_STATUS_FAILED = "failed"
 
     def __init__(self, db_path: str | None = None) -> None:
-        self.db_path = db_path or os.getenv("STATE_DB_PATH", DEFAULT_DB_PATH)
+        self.db_path = db_path or config.STATE_DB_PATH
         self._ensure_table()
 
     @contextmanager
