@@ -29,32 +29,66 @@ RULES_PATH = Path(__file__).parent.parent / "small_business_loan_agent" / "sub_a
 ACTION_LABELS = {"ELIGIBLE": "APPROVE", "INELIGIBLE": "REJECT", "REVIEW": "FLAG FOR MANUAL REVIEW"}
 
 
-def rules_to_markdown(rules: list[dict]) -> str:
-    """Convert the eligibility rules list to readable markdown for better embedding quality."""
-    lines = ["# Cymbal Bank — Small Business Loan Eligibility Rules\n"]
-    for rule in rules:
-        rid = rule["id"]
-        desc = rule["description"]
-        action = rule["action"]
-        conds = rule.get("conditions", {})
-        label = ACTION_LABELS.get(action, action)
+def rule_to_markdown(rule: dict) -> str:
+    """Convert a single eligibility rule to a standalone markdown document."""
+    rid = rule["id"]
+    desc = rule["description"]
+    action = rule["action"]
+    conds = rule.get("conditions", {})
+    label = ACTION_LABELS.get(action, action)
 
-        lines.append(f"## {rid}: {desc}")
-        lines.append(f"**Decision**: {label}")
-        lines.append("")
-        lines.append("**Conditions**:")
-        for key, val in conds.items():
-            human_key = key.replace("_", " ")
-            if isinstance(val, list):
-                lines.append(f"- {human_key}: {', '.join(str(v) for v in val)}")
-            elif isinstance(val, (int, float)) and "revenue" in key:
-                lines.append(f"- {human_key}: ${val:,.0f}")
-            elif isinstance(val, float) and "ratio" in key:
-                lines.append(f"- {human_key}: {val * 100:.0f}%")
-            else:
-                lines.append(f"- {human_key}: {val}")
-        lines.append("")
+    lines = [
+        f"# {rid}: {desc}",
+        f"**Decision**: {label}",
+        "",
+        "**Conditions**:",
+    ]
+    for key, val in conds.items():
+        human_key = key.replace("_", " ")
+        if isinstance(val, list):
+            lines.append(f"- {human_key}: {', '.join(str(v) for v in val)}")
+        elif isinstance(val, (int, float)) and "revenue" in key:
+            lines.append(f"- {human_key}: ${val:,.0f}")
+        elif isinstance(val, float) and "ratio" in key:
+            lines.append(f"- {human_key}: {val * 100:.0f}%")
+        else:
+            lines.append(f"- {human_key}: {val}")
     return "\n".join(lines)
+
+
+def upload_and_ingest(client: httpx.Client, vector_store_id: str, rule: dict) -> None:
+    """Upload one rule as its own file and wait for ingestion."""
+    rid = rule["id"]
+    markdown = rule_to_markdown(rule)
+
+    r = client.post(
+        "/v1/files",
+        files={"file": (f"{rid}.md", BytesIO(markdown.encode()), "text/markdown")},
+        data={"purpose": "assistants"},
+    )
+    r.raise_for_status()
+    file_id = r.json()["id"]
+
+    r = client.post(
+        f"/v1/vector_stores/{vector_store_id}/files",
+        json={"file_id": file_id, "chunking_strategy": {"type": "auto"}},
+    )
+    r.raise_for_status()
+
+    for attempt in range(30):
+        r = client.get(f"/v1/vector_stores/{vector_store_id}/files/{file_id}")
+        r.raise_for_status()
+        status = r.json().get("status")
+        if status == "completed":
+            print(f"  {rid}: ingested (attempt {attempt + 1})")
+            return
+        if status == "failed":
+            print(f"ERROR: Ingestion failed for {rid}.", file=sys.stderr)
+            sys.exit(1)
+        time.sleep(3)
+
+    print(f"ERROR: Timed out waiting for ingestion of {rid}.", file=sys.stderr)
+    sys.exit(1)
 
 
 def main() -> None:
@@ -70,25 +104,13 @@ def main() -> None:
     r.raise_for_status()
     print(f"  OGX status: {r.json().get('status')}")
 
-    # 2 — Load and convert rules
+    # 2 — Load rules
     with open(RULES_PATH) as f:
         data = json.load(f)
     rules = data["rules"]
-    markdown = rules_to_markdown(rules)
-    print(f"  Converted {len(rules)} eligibility rules to markdown ({len(markdown)} chars)")
+    print(f"  Loaded {len(rules)} eligibility rules")
 
-    # 3 — Upload file
-    print("Uploading eligibility rules file …")
-    r = client.post(
-        "/v1/files",
-        files={"file": ("eligibility_rules.md", BytesIO(markdown.encode()), "text/markdown")},
-        data={"purpose": "assistants"},
-    )
-    r.raise_for_status()
-    file_id = r.json()["id"]
-    print(f"  file_id: {file_id}")
-
-    # 4 — Create vector store
+    # 3 — Create vector store
     # embedding_model is an OGX-specific extra field (not in OpenAI spec) — required by this OGX version
     print("Creating vector store …")
     r = client.post(
@@ -103,31 +125,15 @@ def main() -> None:
     vector_store_id = r.json()["id"]
     print(f"  vector_store_id: {vector_store_id}")
 
-    # 5 — Add file to vector store
-    print("Adding file to vector store (embedding …) …")
-    r = client.post(
-        f"/v1/vector_stores/{vector_store_id}/files",
-        json={"file_id": file_id, "chunking_strategy": {"type": "auto"}},
-    )
-    r.raise_for_status()
+    # 4 — Upload each rule as its own file so each becomes an independent chunk.
+    #     A single combined file is treated as one chunk by OGX's auto-chunker
+    #     because it is too small to split — semantic retrieval only works when
+    #     rules are stored as separate vectors.
+    print("Uploading rules (one file per rule for proper per-rule chunking) …")
+    for rule in rules:
+        upload_and_ingest(client, vector_store_id, rule)
 
-    # 6 — Poll until ingestion completes
-    for attempt in range(30):
-        r = client.get(f"/v1/vector_stores/{vector_store_id}/files/{file_id}")
-        r.raise_for_status()
-        status = r.json().get("status")
-        print(f"  ingestion status: {status} (attempt {attempt + 1})")
-        if status == "completed":
-            break
-        if status == "failed":
-            print("ERROR: Ingestion failed.", file=sys.stderr)
-            sys.exit(1)
-        time.sleep(3)
-    else:
-        print("ERROR: Timed out waiting for ingestion.", file=sys.stderr)
-        sys.exit(1)
-
-    # 7 — Smoke-test retrieval
+    # 5 — Smoke-test retrieval
     print("\nSmoke-testing retrieval …")
     test_queries = [
         "annual revenue loan to revenue ratio approval",
