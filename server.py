@@ -38,7 +38,7 @@ from contextlib import asynccontextmanager
 
 import dotenv
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -85,6 +85,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., min_length=1)
     model: str | None = None
+    stream: bool = False
     session_id: str | None = Field(
         None,
         description="Pass the session_id from a prior response to continue the conversation.",
@@ -121,6 +122,82 @@ def _last_user_content(messages: list[ChatMessage]) -> str:
     raise HTTPException(status_code=400, detail="No user message found")
 
 
+async def _resolve_session(request: ChatCompletionRequest) -> str:
+    """Return a valid session_id, creating a new session if none was supplied."""
+    if _runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    if request.session_id:
+        session = await _runner.session_service.get_session(
+            app_name=APP_NAME, user_id=USER_ID, session_id=request.session_id
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id!r} not found")
+        return request.session_id
+    session = await _runner.session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID
+    )
+    return session.id
+
+
+async def _stream_completion(
+    request: ChatCompletionRequest, session_id: str
+) -> AsyncIterator[str]:
+    """Async generator that yields OpenAI-compatible SSE chunks."""
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+    agent_name = os.getenv("AGENT_NAME", "loan-agent")
+
+    def sse(delta: dict, finish_reason: str | None = None) -> str:
+        chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": agent_name,
+            "session_id": session_id,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+        }
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    yield sse({"role": "assistant", "content": ""})
+
+    user_content = _last_user_content(request.messages)
+    new_message = types.Content(
+        role="user", parts=[types.Part.from_text(text=user_content)]
+    )
+
+    tool_index = 0
+    try:
+        async for event in _runner.run_async(
+            user_id=USER_ID,
+            session_id=session_id,
+            new_message=new_message,
+        ):
+            if not event.content or not event.content.parts:
+                continue
+            for part in event.content.parts:
+                if part.function_call:
+                    yield sse({
+                        "content": None,
+                        "tool_calls": [{
+                            "index": tool_index,
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {
+                                "name": part.function_call.name,
+                                "arguments": json.dumps(dict(part.function_call.args or {})),
+                            },
+                        }],
+                    })
+                    tool_index += 1
+                elif part.text and (event.content.role or "") == "model":
+                    yield sse({"content": part.text})
+    except Exception:
+        logger.exception("Error in streaming agent run")
+
+    yield sse({}, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @v1.get("/models")
@@ -132,9 +209,16 @@ async def list_models() -> dict:
     }
 
 
-@v1.post("/chat/completions", response_model=ChatCompletionResponse)
-async def v1_chat_completions(request: ChatCompletionRequest) -> dict:
-    return await chat_completions(request)
+@v1.post("/chat/completions")
+async def v1_chat_completions(request: ChatCompletionRequest):
+    session_id = await _resolve_session(request)
+    if request.stream:
+        return StreamingResponse(
+            _stream_completion(request, session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+    return await _run_completion(request, session_id)
 
 
 @app.get("/health")
@@ -146,28 +230,9 @@ async def health() -> dict:
     return body
 
 
-@app.post("/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(request: ChatCompletionRequest) -> dict:
-    if _runner is None:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
-
-    user_content = _last_user_content(request.messages)
+async def _run_completion(request: ChatCompletionRequest, session_id: str) -> dict:
     model_id = request.model or os.getenv("MODEL_NAME", "gemini-2.5-flash")
-
-    # Reuse an existing session or create a new one
-    session_id = request.session_id
-    if session_id:
-        session = await _runner.session_service.get_session(
-            app_name=APP_NAME, user_id=USER_ID, session_id=session_id
-        )
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
-    else:
-        session = await _runner.session_service.create_session(
-            app_name=APP_NAME, user_id=USER_ID
-        )
-        session_id = session.id
-
+    user_content = _last_user_content(request.messages)
     new_message = types.Content(
         role="user", parts=[types.Part.from_text(text=user_content)]
     )
@@ -223,6 +288,14 @@ async def chat_completions(request: ChatCompletionRequest) -> dict:
         "session_id": session_id,
         "context": context_messages,
     }
+
+
+@app.post("/chat/completions", response_model=ChatCompletionResponse)
+async def chat_completions(request: ChatCompletionRequest) -> dict:
+    if _runner is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    session_id = await _resolve_session(request)
+    return await _run_completion(request, session_id)
 
 
 app.include_router(v1)
