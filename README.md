@@ -1,8 +1,10 @@
-# Mortgage Loan Agent
+# Small Business Loan Agent
 
-A multi-agent system built with the [Google Agent Development Kit (ADK)](https://adk.dev/) that automates mortgage loan processing. It demonstrates sequential multi-agent orchestration, human-in-the-loop approval, LLM-as-Judge validation, and SQLite-backed repair & resume — **runs entirely locally with just a Gemini API key**.
+A multi-agent system built with the [Google Agent Development Kit (ADK)](https://adk.dev/) that automates small business loan processing at **Cymbal Bank**. It demonstrates sequential multi-agent orchestration, human-in-the-loop approval, LLM-as-Judge validation, RAG-backed eligibility rules, and SQLite-backed repair & resume.
 
-## A. Overview & Functionalities
+Runs locally against a Gemini API key, or fully deployed on Red Hat OpenShift AI via the AgentSandbox operator with OpenShell network enforcement.
+
+## A. Overview
 
 ### Agent Details
 
@@ -12,80 +14,143 @@ A multi-agent system built with the [Google Agent Development Kit (ADK)](https:/
 | **Complexity**       | Advanced                                    |
 | **Agent Type**       | Multi-Agent (1 orchestrator + 4 sub-agents) |
 | **Vertical**         | Financial Services                          |
-| **Framework**        | ADK                                         |
-| **Model**            | Gemini 2.0 Flash (configurable via `MODEL_NAME`) |
+| **Framework**        | Google ADK                                  |
+| **Model**            | Gemini 2.5 Flash (configurable via `MODEL_NAME`) |
 
 ### Key Features
 
-| Feature                            | Description                                                                                             |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Multi-Agent Orchestration**      | Orchestrator coordinates 4 specialized sub-agents via `AgentTool` in a sequential workflow              |
-| **Multimodal Document Extraction** | Gemini reads loan application PDFs natively                                                             |
-| **Structured Output**              | Each sub-agent returns validated Pydantic models via `output_schema` / `output_key`                     |
-| **Human-in-the-Loop (HITL)**       | Orchestrator pauses after pricing to present results and wait for explicit user approval                |
-| **LLM-as-Judge Gate**              | After-agent callback validates trajectory correctness and data grounding before showing responses       |
-| **Repair & Resume**                | SQLite workflow management tracks each step; workflow can pause on errors and resume from checkpoint    |
-| **Before/After Callbacks**         | State checks before each sub-agent; state logging and issue detection after each sub-agent              |
-| **Before-Tool Callback**           | Process halt check prevents agents from executing when workflow is in error/pending state               |
-| **Zero Cloud Dependencies**        | State persisted to a local SQLite file — no Firestore, no GCP required for basic usage                 |
+| Feature | Description |
+|---|---|
+| **Multi-Agent Orchestration** | Orchestrator coordinates 4 specialized sub-agents via `AgentTool` in a sequential workflow |
+| **Multimodal Document Extraction** | Gemini reads loan application text/PDFs natively |
+| **Structured Output** | Each sub-agent returns validated Pydantic models via `output_schema` / `output_key` |
+| **Human-in-the-Loop (HITL)** | Orchestrator pauses after pricing to present results and wait for explicit user approval |
+| **LLM-as-Judge Gate** | After-agent callback validates trajectory correctness and data grounding before showing responses |
+| **RAG Eligibility Rules** | Underwriting agent retrieves live policy rules from AutoRAG vector store (falls back to static JSON locally) |
+| **Repair & Resume** | SQLite workflow management tracks each step; workflow can pause on errors and resume from checkpoint |
+| **Zero Cloud Dependencies** | State persisted to a local SQLite file — no Firestore, no GCP required for basic usage |
 
-### Example Interaction
+### Agent Flow
 
-```
-User: Process this loan application for SBL-2025-02142
-      [uploads sample_application_complete.pdf]
-
-Agent: [Calls check_process_status -> initializes new process]
-       [Calls DocumentExtractionAgent -> extracts data from PDF]
-       [Calls UnderwritingAgent -> validates against internal records, checks eligibility]
-       [Calls PricingAgent -> calculates rate based on risk tier]
-
-       Loan Application Summary:
-       - Business: Cymbal Coffee Roasters LLC
-       - Owner: Jane Doe
-       - Loan Amount: $150,000
-       - Annual Revenue: $850,000
-       - Eligibility: ELIGIBLE
-       - Risk Tier: Tier 1 - Low Risk
-       - Interest Rate: 6.50%
-       - Monthly Payment: $2,940.97
-       - Total Interest: $26,458.20
-
-       Do you approve this loan? (yes/no)
-
-User: yes
-
-Agent: [Calls LoanDecisionAgent -> finalizes decision]
-
-       Loan SBL-2025-02142 has been approved.
-       Decision letter DL-2025-02142-001 has been generated.
-```
-
-## B. Architecture
-
-**Agent flow:**
 ```
 SmallBusinessLoanOrchestratorAgent
-  ├── check_process_status (SQLite tool)
+  ├── check_process_status          (SQLite state tool)
   ├── AgentTool(DocumentExtractionAgent)  →  LoanApplicationData
   ├── AgentTool(UnderwritingAgent)         →  UnderwritingReport
   ├── AgentTool(PricingAgent)              →  PricingResult
   └── AgentTool(LoanDecisionAgent)         →  LoanDecisionResult
 ```
 
-**State machine (SQLite, one row per `loan_request_id`):**
+---
+
+## B. Demo Prompts
+
+All prompts use fictional business names and people. Loan request IDs follow the format `SBL-YYYY-NNNNN`.
+
+### Scenario 1 — Complete Application (Happy Path)
+
+Paste in one message. The agent extracts all fields, underwrites, prices, then asks for approval.
+
 ```
-Process State
-  |-- overall_status: active | pending_approval | completed | failed
-  |-- steps:
-  |     |-- DocumentExtractionAgent: { status, data, completed_at }
-  |     |-- UnderwritingAgent:       { status, data, completed_at }
-  |     |-- PricingAgent:            { status, data, completed_at }
-  |     |-- LoanDecisionAgent:       { status, data, completed_at }
-  |-- issues: [ { step, description, resolved } ]
+Process loan application SBL-2025-00201.
+
+Business: Sunrise Bakehouse LLC
+Owner: Morgan Ellis, morgan@sunrisebakehouse.com, 555-0201
+Industry: Retail bakery, 5 years in business, 14 employees
+Financials: $980K annual revenue, $62K net profit, no existing debt
+Loan: $180,000 for 60 months to purchase a commercial deck oven and expand production line
+Collateral: Existing baking equipment, estimated value $140,000
 ```
 
-## C. Setup & Running
+Expected flow: `check_process_status` → `DocumentExtractionAgent` → `UnderwritingAgent` → `PricingAgent` → approval prompt.
+
+Reply **yes** to trigger `LoanDecisionAgent` and generate the decision letter.
+
+---
+
+### Scenario 2 — High-Revenue, Low-Risk Approval
+
+```
+Process loan application SBL-2025-00202.
+
+Business: Blue Ridge Logistics Inc
+Owner: Casey Hartman, casey@blueridgelogistics.com, 555-0202
+Industry: Freight logistics, 9 years in business, 38 employees
+Financials: $4.1M annual revenue, $310K net profit, $120K existing debt (equipment lease)
+Loan: $500,000 for 84 months to purchase two refrigerated delivery trucks
+Collateral: Fleet vehicles and warehouse equipment, estimated value $680,000
+```
+
+Expected: Tier 1 Low Risk, eligible, interest rate ~6-7%, approval prompt.
+
+---
+
+### Scenario 3 — Elevated Risk (Newer Business)
+
+```
+Process loan application SBL-2025-00203.
+
+Business: Pixel & Grain Photography Studio
+Owner: Alex Navarro, alex@pixelandgrain.com, 555-0203
+Industry: Commercial photography, 2 years in business, 3 employees
+Financials: $210K annual revenue, $18K net profit, no existing debt
+Loan: $75,000 for 48 months to purchase camera systems and studio lighting
+Collateral: Camera and studio equipment, estimated value $55,000
+```
+
+Expected: Tier 3 Elevated Risk (short operating history, loan-to-revenue ratio), higher interest rate, REVIEW status. Still reaches approval prompt — reply **yes** or **no** to complete.
+
+---
+
+### Scenario 4 — Missing Fields (Repair & Resume Flow)
+
+```
+Process loan application SBL-2025-00204.
+
+Business: Mesa Verde Landscaping
+Financials: $620K revenue, requesting $120K for 36 months
+```
+
+Expected: Agent extracts partial data, `UnderwritingAgent` halts because required fields are missing (owner name, contact, industry details). The error message lists exactly which fields are missing.
+
+**To resume after adding the missing data:**
+
+```
+Resume SBL-2025-00204. Owner is Taylor Brooks, taylor@mesaverdeland.com, 555-0204.
+Industry: landscaping and grounds maintenance, 6 years in business, 11 employees.
+Net profit $48K, no existing debt. Collateral: landscaping equipment $90K.
+```
+
+---
+
+### Scenario 5 — Status Check
+
+After any application has been submitted, check its status in a new session:
+
+```
+What is the status of loan application SBL-2025-00201?
+```
+
+---
+
+### Scenario 6 — Rejection (Ineligible)
+
+```
+Process loan application SBL-2025-00205.
+
+Business: Coastal Events Pop-Up LLC
+Owner: Riley Chen, riley@coastalevents.com, 555-0205
+Industry: Event planning, 8 months in business, 2 employees
+Financials: $85K annual revenue, $3K net profit, $40K existing business credit card debt
+Loan: $250,000 for 60 months for venue deposits and equipment rental fleet
+Collateral: None offered
+```
+
+Expected: Ineligible — operating history too short, loan-to-revenue ratio exceeds policy limit, insufficient collateral. Agent generates a decline decision letter.
+
+---
+
+## C. Running Locally
 
 ### Prerequisites
 
@@ -99,75 +164,167 @@ Process State
 git clone https://github.com/rrbanda/mortgage.git
 cd mortgage
 
-# Install dependencies
 uv sync
 
-# Configure environment
 cp .env.example .env
-# Edit .env and set your GOOGLE_API_KEY
+# Edit .env — set GOOGLE_API_KEY (or MAAS_API_KEY for Red Hat MaaS)
 ```
 
-### Running the Agent
+### Running with ADK Web UI
 
 ```bash
 uv run adk web
 ```
 
-Then open `http://localhost:8000`, select `small_business_loan_agent`, upload `data/sample_applications/sample_application_complete.pdf`, and send:
+Open `http://localhost:8000`, select `small_business_loan_agent`, and paste any prompt from Section B.
+
+### Running as API Server
+
+```bash
+uv run uvicorn server:app --host 0.0.0.0 --port 8080
+```
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Submit a loan application
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{
+      "role": "user",
+      "content": "Process loan application SBL-2025-00201. Business: Sunrise Bakehouse LLC. Owner: Morgan Ellis, morgan@sunrisebakehouse.com, 555-0201. Industry: retail bakery, 5 years, 14 employees. Financials: $980K revenue, $62K net profit, no debt. Loan: $180K for 60 months for oven purchase. Collateral: baking equipment $140K."
+    }],
+    "model": "loan-agent"
+  }'
+
+# Approve using the session_id from the previous response
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "yes"}],
+    "model": "loan-agent",
+    "session_id": "<session_id from previous response>"
+  }'
+```
+
+---
+
+## D. Deployed on RHOAI (AgentSandbox + OpenShell)
+
+The agent is deployed on Red Hat OpenShift AI as an `agents.x-k8s.io/v1beta1 Sandbox` resource with OpenShell network enforcement. All infrastructure is GitOps-managed — no manual `oc apply` required.
+
+### Repos
+
+| Repo | Contents |
+|---|---|
+| `rrbanda/mortgage` | Agent source code, `Containerfile`, `server.py` |
+| `rrbanda/ai-demos` | Kubernetes manifests — `agents/loan-agent/` |
+| `rrbanda/ai-platforms` | ArgoCD Applications, AppProjects, AutoRAG |
+
+### Architecture on Cluster
 
 ```
-Process this loan application for SBL-2025-02142
+AgentHive (Open WebUI)
+  └── /v1/chat/completions  ──►  loan-agent Pod (AgentSandbox)
+                                   ├── OpenShell supervisor (network enforcement)
+                                   ├── MaaS → Gemini 2.5 Flash
+                                   ├── AutoRAG (OGX) → eligibility rules RAG
+                                   └── SQLite state → PVC
 ```
 
-The SQLite state file (`mortgage_agent_state.db`) is created automatically on first run.
+### Secrets (all SealedSecrets — no plaintext in git)
 
-### Repair & Resume
+| Secret | Contents |
+|---|---|
+| `loan-agent-auth` | MaaS API key (`llm-api-key`) |
+| `openshell-client-tls` | OpenShell gateway TLS (`ca.crt`, `tls.crt`, `tls.key`) |
 
-When a document has missing fields, the agent stops and records the issue in SQLite. To resume:
+### Testing via AgentHive
 
-1. Open `mortgage_agent_state.db` with any SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/))
-2. Find the record for your `loan_request_id`
-3. Edit the JSON in `state_json`: fill in the missing field, set the step's `status` to `completed`, and set `overall_status` to `active`
-4. Re-submit: `Resume processing for SBL-2025-00391`
+1. Open `https://agenthive.<your-cluster-domain>`
+2. Select **loan-agent** in the model dropdown
+3. Paste any prompt from Section B
 
-## D. Configuration
+### Testing via API
+
+```bash
+# Against the cluster Route
+BASE=https://loan-agent-loan-agent.<your-cluster-domain>
+
+curl $BASE/health
+
+curl -X POST $BASE/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{
+      "role": "user",
+      "content": "Process loan application SBL-2025-00201. Business: Sunrise Bakehouse LLC. Owner: Morgan Ellis, 555-0201. Retail bakery, 5 years, $980K revenue, $62K profit. Requesting $180K for 60 months. Collateral: baking equipment $140K."
+    }],
+    "model": "loan-agent"
+  }'
+```
+
+### Building and Pushing a New Image
+
+```bash
+cd mortgage
+
+podman build --platform linux/amd64 -t small-business-loan-agent:latest -f Containerfile .
+
+# Re-tag before every push (required — tag must match the new build)
+REGISTRY=<your-openshift-registry-route>
+podman tag small-business-loan-agent:latest $REGISTRY/loan-agent/small-business-loan-agent:latest
+podman push $REGISTRY/loan-agent/small-business-loan-agent:latest
+```
+
+Then delete the running pod — `imagePullPolicy: Always` pulls the new image on restart.
+
+---
+
+## E. Configuration
+
+### Local
 
 | Variable | Default | Description |
 |---|---|---|
-| `GOOGLE_API_KEY` | — | **Required.** Gemini API key |
-| `MODEL_NAME` | `gemini-2.0-flash` | Model to use for all agents |
-| `STATE_DB_PATH` | `./mortgage_agent_state.db` | SQLite database file path |
+| `GOOGLE_API_KEY` | — | Gemini API key (local dev) |
+| `MODEL_NAME` | `gemini-2.5-flash` | Model for all agents |
+| `STATE_DB_PATH` | `./mortgage_agent_state.db` | SQLite state file |
 
-### Optional: Vertex AI
+### RHOAI Cluster (set in `sandbox.yaml`)
 
-To use Vertex AI instead of a plain API key, remove `GOOGLE_API_KEY` from `.env` and set:
-```
-GOOGLE_GENAI_USE_VERTEXAI=TRUE
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CLOUD_LOCATION=global
-```
+| Variable | Value | Description |
+|---|---|---|
+| `MAAS_BASE_URL` | cluster URL | Red Hat MaaS endpoint |
+| `MAAS_API_KEY` | from SealedSecret | MaaS API key |
+| `MODEL_NAME` | `gemini-2.5-flash` | Model backend |
+| `AUTORAG_BASE_URL` | cluster URL | OGX AutoRAG endpoint |
+| `AUTORAG_VECTOR_STORE_ID` | `vs_...` | Seeded eligibility rules store |
+| `STATE_DB_PATH` | `/app/data/state.db` | SQLite on PVC |
+| `AGENT_NAME` | `loan-agent` | Model ID shown in Open WebUI |
+| `BANK_NAME` | `Cymbal Bank` | Bank name in agent prompts |
 
-### Optional: GCS document fallback
+---
 
-To enable loading documents from Google Cloud Storage:
-```bash
-uv sync --extra gcs
-```
-Then set `GCS_DATA_BUCKET=your-bucket-name` in `.env`.
+## F. Customization
 
-## E. Customization
-
-- **Prompts:** Each sub-agent has a `prompt.py`. Modify to change agent behavior.
-- **Eligibility rules:** Edit `sub_agents/underwriting/eligibility_rules.json`.
-- **Mock data:** Replace `MOCK_INTERNAL_RECORDS` in `sub_agents/underwriting/tools.py` with real API calls.
+- **Prompts:** Each sub-agent has a `prompt.py`. Modify to change agent behavior or bank name references.
+- **Eligibility rules:** Edit `sub_agents/underwriting/eligibility_rules.json` (or re-seed AutoRAG after changes).
+- **Mock data:** Replace `MOCK_INTERNAL_RECORDS` in `sub_agents/underwriting/tools.py` with real CRM/API calls.
 - **Pricing:** Replace `_determine_risk_tier` in `sub_agents/pricing/tools.py` with your pricing engine.
 
-## F. Tests
+---
+
+## G. Tests
 
 ```bash
 uv sync --group dev
 uv run pytest tests/unit
 ```
+
+---
 
 ## License
 
