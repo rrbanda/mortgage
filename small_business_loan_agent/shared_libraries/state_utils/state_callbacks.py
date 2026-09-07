@@ -121,10 +121,10 @@ def _check_for_issues(agent_name: str, output_data) -> tuple[bool, str, list]:
             issue_description = f"Missing {len(missing_fields)} critical field(s): {', '.join(missing_fields)}"
 
     elif agent_name == "UnderwritingAgent":
-        eligibility_status = output_data.get("eligibility_status")
-        if eligibility_status == "INELIGIBLE":
-            requires_review = True
-            issue_description = "Application failed eligibility check - requires manual review"
+        # INELIGIBLE is a valid business outcome — the orchestrator routes to
+        # LoanDecisionAgent for a decline letter. Only missing-data situations
+        # need human review (handled by DocumentExtractionAgent branch above).
+        pass
 
     return requires_review, issue_description, missing_fields
 

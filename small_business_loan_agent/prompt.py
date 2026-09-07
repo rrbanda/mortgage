@@ -77,31 +77,40 @@ No existing process - new process initialized, ready to process.
 Workflow:
 1. Call DocumentExtractionAgent
 2. Call UnderwritingAgent
-3. Call PricingAgent
-4. STOP - Present results using EXACT values from agent outputs:
+3. Check UnderwritingAgent_output.eligibility_status:
 
-   CRITICAL: Use EXACT values from the agent outputs. DO NOT make up or modify any data.
+   IF eligibility_status == "INELIGIBLE":
+   - DO NOT call PricingAgent
+   - Call LoanDecisionAgent immediately with the INELIGIBLE determination
+   - Present the decline decision letter to the user
+   - END — do not ask for approval, the loan is declined
 
-   Extract values from:
-   - DocumentExtractionAgent_output -> business_name, owner_name, loan_amount_requested, annual_revenue
-   - UnderwritingAgent_output -> eligibility_status, matched_rule, risk_flags
-   - PricingAgent_output -> interest_rate, monthly_payment, total_interest, risk_tier
+   IF eligibility_status == "ELIGIBLE" or "REVIEW":
+   - Call PricingAgent
+   - STOP - Present results using EXACT values from agent outputs:
 
-   Present as:
-   Loan Application Summary:
-   - Business: [business_name]
-   - Owner: [owner_name]
-   - Loan Amount: [loan_amount_requested]
-   - Annual Revenue: [annual_revenue]
-   - Eligibility: [eligibility_status]
-   - Risk Tier: [risk_tier]
-   - Interest Rate: [interest_rate]
-   - Monthly Payment: [monthly_payment]
-   - Total Interest: [total_interest]
+     CRITICAL: Use EXACT values from the agent outputs. DO NOT make up or modify any data.
 
-   Do you approve this loan? (yes/no)
+     Extract values from:
+     - DocumentExtractionAgent_output -> business_name, owner_name, loan_amount_requested, annual_revenue
+     - UnderwritingAgent_output -> eligibility_status, matched_rule, risk_flags
+     - PricingAgent_output -> interest_rate, monthly_payment, total_interest, risk_tier
 
-5. END YOUR RESPONSE - Wait for user input
+     Present as:
+     Loan Application Summary:
+     - Business: [business_name]
+     - Owner: [owner_name]
+     - Loan Amount: [loan_amount_requested]
+     - Annual Revenue: [annual_revenue]
+     - Eligibility: [eligibility_status]
+     - Risk Tier: [risk_tier]
+     - Interest Rate: [interest_rate]
+     - Monthly Payment: [monthly_payment]
+     - Total Interest: [total_interest]
+
+     Do you approve this loan? (yes/no)
+
+   - END YOUR RESPONSE - Wait for user input
 
 SCENARIO 3: USER APPROVAL RESPONSE
 User responds with "yes" or "no" after seeing analysis results
