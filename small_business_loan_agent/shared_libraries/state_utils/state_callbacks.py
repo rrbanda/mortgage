@@ -183,5 +183,20 @@ async def after_agent_callback_with_state_logging(
         state_service = ProcessStateService()
         _persist_step_result(state_service, request_id, agent_name, output_data)
 
+        # When underwriting returns INELIGIBLE, auto-skip PricingAgent so the
+        # prerequisite check allows LoanDecisionAgent to proceed immediately.
+        if (
+            agent_name == "UnderwritingAgent"
+            and isinstance(output_data, dict)
+            and output_data.get("eligibility_status") == "INELIGIBLE"
+        ):
+            state_service.update_step_status(
+                request_id=request_id,
+                step_name=ProcessStateService.STEP_PRICING,
+                status=ProcessStateService.STATUS_SKIPPED,
+                data={"skipped_reason": "Loan INELIGIBLE — pricing not applicable"},
+            )
+            logger.info(f"Auto-skipped PricingAgent for {request_id} due to INELIGIBLE status")
+
     except Exception as e:
         logger.error(f"Error in after_agent_callback_with_state_logging: {e}")

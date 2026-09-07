@@ -69,6 +69,7 @@ class ProcessStateService:
     STATUS_NOT_STARTED = "not_started"
     STATUS_IN_PROGRESS = "in_progress"
     STATUS_COMPLETED = "completed"
+    STATUS_SKIPPED = "skipped"
     STATUS_PENDING_APPROVAL = "pending_approval"
     STATUS_APPROVED = "approved"
     STATUS_REJECTED = "rejected"
@@ -186,7 +187,7 @@ class ProcessStateService:
             if error_message:
                 step["error_message"] = error_message
 
-            if status == self.STATUS_COMPLETED:
+            if status in (self.STATUS_COMPLETED, self.STATUS_SKIPPED):
                 next_step = self._get_next_step(step_name)
                 if next_step:
                     state["current_step"] = next_step
@@ -251,7 +252,7 @@ class ProcessStateService:
         for i in range(step_index):
             prev_step_name = self.ALL_STEPS[i]
             prev_status = steps.get(prev_step_name, {}).get("status")
-            if prev_status not in [self.STATUS_COMPLETED, self.STATUS_APPROVED]:
+            if prev_status not in [self.STATUS_COMPLETED, self.STATUS_APPROVED, self.STATUS_SKIPPED]:
                 return False
 
         return True

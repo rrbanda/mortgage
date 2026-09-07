@@ -54,10 +54,33 @@ async def before_tool_callback_check_process_status(
     args: dict[str, Any],
     tool_context: ToolContext,
 ) -> dict | None:
-    """Before-tool callback — checks Firestore state before each agent tool execution."""
+    """Before-tool callback — checks state before each agent tool execution."""
     try:
         if tool.name == "check_process_status":
             return None
+
+        # Block PricingAgent when underwriting determined the loan is ineligible.
+        if tool.name == "PricingAgent":
+            uw_output = tool_context.state.get("UnderwritingAgent_output") or {}
+            if isinstance(uw_output, dict) and uw_output.get("eligibility_status") == "INELIGIBLE":
+                logger.info("Skipping PricingAgent — loan is INELIGIBLE. Redirecting to LoanDecisionAgent.")
+                # Mark PricingAgent as skipped so can_proceed_to_step allows LoanDecisionAgent.
+                request_id = tool_context.state.get("loan_request_id")
+                if request_id:
+                    state_service = ProcessStateService()
+                    state_service.update_step_status(
+                        request_id=request_id,
+                        step_name="PricingAgent",
+                        status=ProcessStateService.STATUS_SKIPPED,
+                        data={"skipped_reason": "Loan INELIGIBLE — pricing not applicable"},
+                    )
+                return {
+                    "status": "skipped",
+                    "reason": (
+                        "Loan is INELIGIBLE. Do not call PricingAgent. "
+                        "Call LoanDecisionAgent now to generate the decline letter."
+                    ),
+                }
 
         request_id = tool_context.state.get("loan_request_id")
         if not request_id:
