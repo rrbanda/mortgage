@@ -125,9 +125,10 @@ def _last_user_content(messages: list[ChatMessage]) -> str:
 
 @v1.get("/models")
 async def list_models() -> dict:
+    agent_name = os.getenv("AGENT_NAME", "loan-agent")
     return {
         "object": "list",
-        "data": [{"id": "loan-agent", "object": "model", "owned_by": "loan-agent"}],
+        "data": [{"id": agent_name, "object": "model", "owned_by": agent_name}],
     }
 
 
