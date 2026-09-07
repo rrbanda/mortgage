@@ -165,7 +165,9 @@ async def _stream_completion(
         role="user", parts=[types.Part.from_text(text=user_content)]
     )
 
-    tool_index = 0
+    # Track whether we have opened a <think> block for tool-call visibility.
+    # Open WebUI renders <think>…</think> as a collapsible "Reasoning" section.
+    in_think = False
     try:
         async for event in _runner.run_async(
             user_id=USER_ID,
@@ -176,23 +178,22 @@ async def _stream_completion(
                 continue
             for part in event.content.parts:
                 if part.function_call:
-                    yield sse({
-                        "content": None,
-                        "tool_calls": [{
-                            "index": tool_index,
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": part.function_call.name,
-                                "arguments": json.dumps(dict(part.function_call.args or {})),
-                            },
-                        }],
-                    })
-                    tool_index += 1
+                    if not in_think:
+                        yield sse({"content": "<think>\n"})
+                        in_think = True
+                    args = dict(part.function_call.args or {})
+                    args_str = json.dumps(args, indent=2) if args else "{}"
+                    yield sse({"content": f"▶ **{part.function_call.name}**\n```json\n{args_str}\n```\n"})
                 elif part.text and (event.content.role or "") == "model":
+                    if in_think:
+                        yield sse({"content": "</think>\n\n"})
+                        in_think = False
                     yield sse({"content": part.text})
     except Exception:
         logger.exception("Error in streaming agent run")
+
+    if in_think:
+        yield sse({"content": "</think>\n\n"})
 
     yield sse({}, finish_reason="stop")
     yield "data: [DONE]\n\n"
