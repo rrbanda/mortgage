@@ -287,11 +287,17 @@ async def _run_completion(request: ChatCompletionRequest, session_id: str) -> di
     }
 
 
-@app.post("/chat/completions", response_model=ChatCompletionResponse)
-async def chat_completions(request: ChatCompletionRequest) -> dict:
+@app.post("/chat/completions")
+async def chat_completions(request: ChatCompletionRequest):
     if _runner is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
     session_id = await _resolve_session(request)
+    if request.stream:
+        return StreamingResponse(
+            _stream_completion(request, session_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     return await _run_completion(request, session_id)
 
 
