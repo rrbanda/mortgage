@@ -35,11 +35,11 @@
 
 .reveal {
   font-family: var(--font-text);
-  font-size: 28px;
+  font-size: 22px;
   color: var(--rh-dark);
 }
 .reveal .slides { text-align: left; }
-.reveal .slides section { background: var(--rh-white); padding: 40px 60px; }
+.reveal .slides section { background: var(--rh-white); padding: 30px 50px; box-sizing: border-box; overflow: hidden; }
 
 .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
   font-family: var(--font-display);
@@ -49,10 +49,10 @@
   line-height: 1.15;
   margin-bottom: 0.5em;
 }
-.reveal h1 { font-size: 2.2em; font-weight: 700; }
-.reveal h2 { font-size: 1.5em; font-weight: 700; }
-.reveal h3 { font-size: 1.1em; font-weight: 600; color: var(--rh-gray-600); }
-.reveal p { line-height: 1.55; margin-bottom: 0.7em; }
+.reveal h1 { font-size: 2em; font-weight: 700; }
+.reveal h2 { font-size: 1.35em; font-weight: 700; }
+.reveal h3 { font-size: 1em; font-weight: 600; color: var(--rh-gray-600); }
+.reveal p { line-height: 1.45; margin-bottom: 0.5em; }
 .reveal strong { font-weight: 700; }
 .reveal em { font-style: italic; color: var(--rh-gray-600); }
 .reveal code {
@@ -73,14 +73,14 @@
 }
 .reveal a { color: var(--rh-blue); text-decoration: underline; }
 .reveal ul, .reveal ol { margin-left: 0; padding-left: 1.2em; }
-.reveal li { margin-bottom: 0.4em; line-height: 1.45; }
+.reveal li { margin-bottom: 0.25em; line-height: 1.35; }
 .reveal blockquote {
   background: var(--rh-gray-100);
   border-left: 4px solid var(--rh-red);
-  padding: 16px 24px;
-  margin: 1em 0;
+  padding: 12px 20px;
+  margin: 0.6em 0;
   font-style: normal;
-  font-size: 0.95em;
+  font-size: 0.85em;
   width: auto;
 }
 .reveal blockquote p { margin: 0; }
@@ -89,13 +89,13 @@
 .section-label {
   display: inline-block;
   font-family: var(--font-display);
-  font-size: 0.5em;
+  font-size: 0.55em;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  padding: 4px 14px;
+  padding: 3px 12px;
   border-radius: 4px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .section-label.overview { background: var(--rh-blue); color: white; }
 .section-label.architecture { background: var(--rh-teal); color: white; }
@@ -110,8 +110,8 @@
 .reveal table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.72em;
-  margin: 0.8em 0;
+  font-size: 0.75em;
+  margin: 0.5em 0;
 }
 .reveal table th {
   background: var(--rh-dark);
@@ -123,7 +123,7 @@
   border: none;
 }
 .reveal table td {
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--rh-gray-200);
   vertical-align: top;
 }
@@ -134,13 +134,13 @@
 .reveal table .cell-red { color: var(--rh-red); font-weight: 700; }
 
 /* Diagram boxes */
-.diagram-container { display: flex; gap: 16px; align-items: stretch; margin: 1em 0; }
+.diagram-container { display: flex; gap: 12px; align-items: stretch; margin: 0.6em 0; }
 .diagram-box {
   flex: 1;
   border-radius: 8px;
-  padding: 16px 20px;
+  padding: 12px 16px;
   font-size: 0.72em;
-  line-height: 1.4;
+  line-height: 1.35;
   border: 2px solid transparent;
 }
 .diagram-box h4 {
@@ -186,13 +186,13 @@
   justify-content: center;
   height: 100%;
 }
-.title-slide h1 { font-size: 2.4em; margin-bottom: 0.2em; }
+.title-slide h1 { font-size: 2.2em; margin-bottom: 0.2em; }
 .title-slide .subtitle {
   font-family: var(--font-display);
-  font-size: 1.15em;
+  font-size: 1.05em;
   font-weight: 400;
   color: var(--rh-gray-600);
-  margin-bottom: 1.5em;
+  margin-bottom: 1.2em;
 }
 .title-slide .meta {
   font-size: 0.8em;
@@ -262,45 +262,45 @@
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 30px;
-  margin-top: 0.8em;
+  gap: 24px;
+  margin-top: 0.5em;
 }
 .two-col .col-label {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.85em;
+  font-size: 0.8em;
   color: var(--rh-teal);
-  margin-bottom: 0.4em;
+  margin-bottom: 0.3em;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.two-col ul { font-size: 0.82em; }
+.two-col ul { font-size: 0.8em; }
 
 /* Stat cards */
 .stat-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-top: 1em;
+  gap: 14px;
+  margin-top: 0.8em;
 }
 .stat-card {
   text-align: center;
-  padding: 20px 12px;
+  padding: 16px 10px;
   border-radius: 8px;
   background: var(--rh-gray-100);
 }
 .stat-card .stat-value {
   font-family: var(--font-display);
-  font-size: 1.8em;
+  font-size: 1.6em;
   font-weight: 800;
   color: var(--rh-blue);
   line-height: 1.1;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .stat-card .stat-label {
   font-size: 0.65em;
   color: var(--rh-gray-600);
-  line-height: 1.35;
+  line-height: 1.3;
 }
 </style>
 </head>
@@ -497,39 +497,39 @@
 
   <table>
     <thead>
-      <tr><th>Hook</th><th>Callback</th><th>What it actually does</th></tr>
+      <tr><th>Hook</th><th>Callback</th><th>What it does</th></tr>
     </thead>
     <tbody>
       <tr>
         <td><strong>before_agent</strong></td>
         <td><code>extract_request_id</code></td>
-        <td>Parses the loan ID (SBL-YYYY-XXXXX) from the user message. No ID? Agent asks for one instead of guessing.</td>
+        <td>Parses loan ID (SBL-YYYY-XXXXX) from user message; stores inline documents for later injection</td>
       </tr>
       <tr>
         <td><strong>before_tool</strong></td>
         <td><code>halt/skip guard</code></td>
-        <td>Blocks tool execution if the process is halted, completed, or if pricing should be skipped for ineligible loans.</td>
+        <td>Blocks execution if process is halted, completed, or pricing should be skipped (INELIGIBLE)</td>
       </tr>
       <tr>
         <td><strong>before_model</strong></td>
         <td><code>inject_document</code></td>
-        <td>Injects the loan application PDF or image into the LLM request context — only for DocumentExtractionAgent.</td>
+        <td>Injects PDF/image into LLM request context — DocumentExtractionAgent only</td>
       </tr>
       <tr>
         <td><strong>after_agent</strong></td>
         <td><code>state_logging</code></td>
-        <td>Persists every sub-agent's structured output to SQLite. Detects INELIGIBLE status and flags PricingAgent for skip.</td>
+        <td>Persists sub-agent output to SQLite; detects INELIGIBLE → flags PricingAgent skip</td>
       </tr>
       <tr>
         <td><strong>after_agent</strong></td>
         <td><code>llm_judge_gate</code></td>
-        <td>A second LLM call that checks trajectory, grounding, and completeness. If it fails, the response is blocked.</td>
+        <td>Second LLM call validates trajectory, grounding, completeness. Fails → response blocked</td>
       </tr>
     </tbody>
   </table>
 
   <blockquote>
-    <p>The LLM-as-Judge validates every orchestrator response: Did the tools run in the right order? Do all numbers match the structured outputs? Is anything missing? If any check fails, the user sees a generic retry message — not a hallucinated answer.</p>
+    <p>The LLM-as-Judge checks every orchestrator response: correct tool order, all numbers match structured outputs, nothing missing. Fail = generic retry message, not hallucinated data. We fail closed.</p>
   </blockquote>
   <aside class="notes">
     ADK gives you four callback hooks on every LlmAgent, and we use all four. Let me walk through each one with the actual implementation details.
@@ -642,7 +642,7 @@
   <h3><span class="section-label knowledge">Knowledge</span></h3>
   <h2>Skills — domain knowledge loaded on demand</h2>
 
-  <p style="font-size:0.85em;">The orchestrator loads markdown files as "skills" using ADK's <code>SkillToolset</code>. These aren't hard-coded into prompts — the LLM decides when to load them based on context.</p>
+  <p style="font-size:0.8em;">The orchestrator loads markdown files via ADK's <code>SkillToolset</code> (<code>list_skills</code>, <code>load_skill</code>). The LLM decides when to load them based on context.</p>
 
   <table>
     <thead>
@@ -699,24 +699,22 @@
   <h3><span class="section-label demo">Demo</span></h3>
   <h2>What a real conversation looks like</h2>
 
-  <div style="font-size:0.78em;">
-    <p><strong style="color:var(--rh-blue);">User:</strong> "Process this loan application for SBL-2026-10001: Acme Bakery, $150K loan, 5 years in business, $420K annual revenue..."</p>
+  <div style="font-size:0.75em;">
+    <p style="margin-bottom:0.3em;"><strong style="color:var(--rh-blue);">User:</strong> "Process loan SBL-2026-10001: Acme Bakery, $150K, 5 years in business, $420K revenue..."</p>
 
-    <div style="background:var(--rh-gray-100); border-radius:6px; padding:12px 16px; margin:0.6em 0; font-size:0.92em;">
-      <p style="margin:0 0 4px 0;"><strong>Behind the scenes:</strong></p>
-      <code style="font-size:0.9em;">check_process_status</code> &rarr; <code>load_skill("loan-orchestration-protocol")</code> &rarr; <code>DocumentExtractionAgent</code> &rarr; <code>UnderwritingAgent</code> + 2 RAG queries &rarr; <code>PricingAgent</code>
+    <div style="background:var(--rh-gray-100); border-radius:6px; padding:8px 14px; margin:0.4em 0; font-size:0.9em;">
+      <code>check_process_status</code> &rarr; <code>load_skill</code> &rarr; <code>DocExtraction</code> &rarr; <code>Underwriting</code> + 2 RAG &rarr; <code>Pricing</code>
     </div>
 
-    <p><strong style="color:var(--rh-teal);">Agent:</strong> "Application processed. Acme Bakery qualifies as Tier 2 (Moderate Risk). Proposed terms: 7.75% interest rate, $3,012.43/month over 60 months. Total interest: $30,745.80. <strong>Do you approve these terms?</strong>"</p>
+    <p style="margin-bottom:0.3em;"><strong style="color:var(--rh-teal);">Agent:</strong> "Acme Bakery qualifies as Tier 2. Terms: 7.75%, $3,012.43/mo over 60 months. Total interest: $30,745.80. <strong>Do you approve?</strong>"</p>
 
-    <p><strong style="color:var(--rh-blue);">User:</strong> "Yes, approve it."</p>
+    <p style="margin-bottom:0.3em;"><strong style="color:var(--rh-blue);">User:</strong> "Yes, approve it."</p>
 
-    <div style="background:var(--rh-gray-100); border-radius:6px; padding:12px 16px; margin:0.6em 0; font-size:0.92em;">
-      <p style="margin:0 0 4px 0;"><strong>Behind the scenes:</strong></p>
-      <code style="font-size:0.9em;">check_process_status</code> (may reload from SQLite) &rarr; <code>LoanDecisionAgent</code> &rarr; LLM-as-Judge &rarr; response
+    <div style="background:var(--rh-gray-100); border-radius:6px; padding:8px 14px; margin:0.4em 0; font-size:0.9em;">
+      <code>check_process_status</code> (reload from SQLite) &rarr; <code>LoanDecisionAgent</code> &rarr; LLM-as-Judge &rarr; response
     </div>
 
-    <p><strong style="color:var(--rh-teal);">Agent:</strong> "Loan SBL-2026-10001 has been approved. Formal approval letter generated (ref: DL-2026-10001). The letter has been sent to the applicant at acme@example.com."</p>
+    <p style="margin-bottom:0;"><strong style="color:var(--rh-teal);">Agent:</strong> "Loan SBL-2026-10001 approved. Approval letter generated (ref: DL-2026-10001)."</p>
   </div>
   <aside class="notes">
     Let me trace through the exact tool sequence for this example so you can see every component firing.
@@ -776,7 +774,9 @@ Reveal.initialize({
   slideNumber: 'c/t',
   width: 1280,
   height: 720,
-  margin: 0,
+  margin: 0.04,
+  minScale: 0.5,
+  maxScale: 1.5,
   center: false,
   transition: 'slide',
   transitionSpeed: 'default',
