@@ -1,6 +1,6 @@
 # Architecture
 
-Detailed architecture documentation for the Small Business Loan Agent. Every diagram is traced from the actual source code. Each section includes an editable Mermaid diagram.
+Detailed architecture documentation for the Loan Agent. Every diagram is traced from the actual source code. Each section includes an editable Mermaid diagram.
 
 ---
 
@@ -96,7 +96,7 @@ The agent uses ADK's `AgentTool` pattern for sequential orchestration: 1 orchest
 
 | Agent | `output_key` | Model | Tools | RAG Calls | Callbacks |
 |---|---|---|---|---|---|
-| **SmallBusinessLoanOrchestratorAgent** | — | Gemini 2.5 Flash | `SkillToolset`, `check_process_status`, `AgentTool(×4)` | — | `before_agent`: extract request ID · `before_tool`: halt/skip guard · `after_agent`: LLM-as-Judge |
+| **LoanOrchestratorAgent** | — | Gemini 2.5 Flash | `SkillToolset`, `check_process_status`, `AgentTool(×4)` | — | `before_agent`: extract request ID · `before_tool`: halt/skip guard · `after_agent`: LLM-as-Judge |
 | **DocumentExtractionAgent** | `DocumentExtractionAgent_output` | Gemini 2.5 Flash | — (no tools) | — | `before_agent`: state check · `before_model`: inject document · `after_agent`: state logging |
 | **UnderwritingAgent** | `UnderwritingAgent_output` | Gemini 2.5 Flash | `get_internal_business_data`, `retrieve_underwriting_context` | 2 AutoRAG queries (LLM tool call) | `before_agent`: state check + load rules · `after_agent`: state logging + INELIGIBLE skip |
 | **PricingAgent** | `PricingAgent_output` | Gemini 2.5 Flash | `calculate_loan_pricing` | — | `before_agent`: state check · `after_agent`: state logging |
@@ -158,7 +158,7 @@ check_process_status → load_skill("loan-orchestration-protocol")
 ```mermaid
 graph TD
     START["User Message"] --> BCA["before_agent:\nextract_request_id"]
-    BCA --> Orch["SmallBusinessLoanOrchestratorAgent\n(Gemini 2.5 Flash)"]
+    BCA --> Orch["LoanOrchestratorAgent\n(Gemini 2.5 Flash)"]
 
     Orch --> CPS["check_process_status\n(SQLite)"]
     CPS --> Decision{action?}

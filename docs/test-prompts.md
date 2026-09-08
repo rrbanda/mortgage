@@ -1,6 +1,6 @@
 # Test Prompts
 
-Categorized test prompts for the Small Business Loan Agent. Each prompt includes
+Categorized test prompts for the Loan Agent. Each prompt includes
 the expected tool sequence and outcome so testers know what to verify in the response.
 
 ---

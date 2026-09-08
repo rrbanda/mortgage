@@ -1,6 +1,6 @@
 # Demo Speaker Notes
 
-Tell-Show-Tell format for each architecture diagram. Use these as talking points when presenting the Small Business Loan Agent.
+Tell-Show-Tell format for each architecture diagram. Use these as talking points when presenting the Loan Agent.
 
 ---
 

@@ -1,6 +1,6 @@
 # OpenShell Sandbox Deployment
 
-Run the Small Business Loan Agent inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with policy-enforced network isolation and credential injection. This is the recommended deployment mode for production environments where the agent processes real loan applications with sensitive financial data.
+Run the Loan Agent inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with policy-enforced network isolation and credential injection. This is the recommended deployment mode for production environments where the agent processes real loan applications with sensitive financial data.
 
 ## Why Use a Sandbox?
 
