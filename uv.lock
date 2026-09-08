@@ -3098,7 +3098,7 @@ requires-dist = [
     { name = "google-cloud-aiplatform", extras = ["adk", "agent-engines"], marker = "extra == 'vertexai'", specifier = ">=1.93.0" },
     { name = "google-cloud-firestore", marker = "extra == 'vertexai'", specifier = ">=2.21.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=2.0.0" },
-    { name = "mlflow", extras = ["litellm"], marker = "extra == 'tracing'", specifier = ">=2.16.0" },
+    { name = "mlflow", marker = "extra == 'tracing'", specifier = ">=2.16.0" },
     { name = "reportlab", specifier = ">=4.4.10" },
     { name = "rh-maas-litellm", git = "https://github.com/rrbanda/rh-maas-litellm.git" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.9.0" },
