@@ -1,10 +1,10 @@
 {
-  "title": "Loan Agent — Multi-Agent Architecture on Google ADK",
+  "title": "Loan Agent — Multi-Agent Architecture on OpenShift AI",
   "slides": [
     {
       "type": "title",
       "title": "Loan Processing Agent",
-      "subtitle": "Multi-Agent Orchestration with Google ADK, AutoRAG, and Human-in-the-Loop",
+      "subtitle": "Multi-Agent Orchestration with Google ADK on OpenShift AI",
       "presenter": "Raghu Banda",
       "presenter_title": "Red Hat AI",
       "date": ""
@@ -14,168 +14,161 @@
       "title": "End-to-end loan processing — fully automated, fully auditable",
       "sectionMarker": "At a Glance",
       "stats": [
-        { "value": "1 + 4", "label": "One orchestrator agent coordinates four specialized sub-agents via ADK AgentTool" },
+        { "value": "1 + 4", "label": "One orchestrator coordinates four specialist sub-agents via ADK AgentTool" },
         { "value": "AutoRAG", "label": "9-doc regulatory corpus (SBA, ECOA, Reg B) retrieved at underwriting and decision time" },
         { "value": "HITL", "label": "Human-in-the-loop pause after pricing — no loan approved without explicit user consent" },
-        { "value": "Repair", "label": "SQLite-backed state persistence enables repair & resume across pod restarts and sessions" }
+        { "value": "Resume", "label": "SQLite-backed state persistence enables repair & resume across pod restarts and sessions" }
       ]
     },
     {
       "type": "icon-row",
-      "title": "Why a multi-agent architecture?",
-      "sectionMarker": "Design",
+      "title": "Why multiple agents instead of one big prompt?",
+      "sectionMarker": "Architecture",
       "items": [
         {
           "icon": "brain",
-          "label": "Separation of Concerns",
-          "description": "Each sub-agent has one job, its own prompt, its own output schema, and only the tools it needs"
+          "label": "Focused Prompts",
+          "description": "Each agent has one job, its own system prompt, and a Pydantic output schema. No cross-stage contamination"
         },
         {
           "icon": "shield",
-          "label": "Guardrails at Every Layer",
-          "description": "before_agent, before_tool, before_model, and after_agent callbacks enforce policy at every step"
+          "label": "Isolated Tools",
+          "description": "Sub-agents only get the tools they need. PricingAgent can't call finalize_loan_decision. No tool leakage"
         },
         {
-          "icon": "magnifying_glass",
-          "label": "LLM-as-Judge Gate",
-          "description": "Every orchestrator response is validated for trajectory, grounding, and completeness before reaching the user"
+          "icon": "clipboard_checklist",
+          "label": "Testable Boundaries",
+          "description": "Each agent writes structured output to a session state key. Test underwriting in isolation, swap pricing logic independently"
         },
         {
-          "icon": "storage",
-          "label": "Dual-Write State",
-          "description": "ADK session state + SQLite persistence — the agent can survive restarts and resume from any checkpoint"
+          "icon": "padlock_locked",
+          "label": "Locked Down",
+          "description": "Sub-agents set disallow_transfer_to_parent and disallow_transfer_to_peers to True. They can't call other agents"
         }
       ]
     },
     {
-      "type": "table",
-      "title": "The agent roster — 5 agents, each with a specific role",
-      "sectionMarker": "Pipeline",
-      "headers": ["Agent", "Role", "Output", "RAG"],
-      "rows": [
-        ["Orchestrator", "Coordinates the full pipeline, loads skills, manages HITL", "—", "—"],
-        ["DocumentExtractionAgent", "Extracts structured data from loan applications (PDF/text)", "LoanApplicationData", "—"],
-        ["UnderwritingAgent", "Validates data, checks SBA eligibility, assesses risk", "UnderwritingReport", "2 queries"],
-        ["PricingAgent", "Calculates interest rate, monthly payment, risk tier", "PricingResult", "—"],
-        ["LoanDecisionAgent", "Generates approval or decline letters with regulatory compliance", "LoanDecisionResult", "1 query"]
-      ]
-    },
-    {
-      "type": "content",
-      "title": "The happy path — from application to approval in one conversation",
-      "sectionMarker": "Pipeline",
-      "icon": "flowchart",
-      "bullets": [
-        "**Step 1** — User submits a loan application → check_process_status initializes tracking in SQLite",
-        "**Step 2** — DocumentExtractionAgent parses the application into structured LoanApplicationData",
-        "**Step 3** — UnderwritingAgent queries AutoRAG for SBA eligibility rules and industry guidance, then validates",
-        "**Step 4** — PricingAgent calculates rate, monthly payment, and total interest based on risk tier",
-        "**Step 5** — Orchestrator presents pricing and pauses for human approval (HITL)",
-        "**Step 6** — User approves → LoanDecisionAgent generates a formal approval letter",
-        "**Quality gate** — LLM-as-Judge validates the entire response before it reaches the user"
-      ]
+      "type": "image",
+      "title": "The four-agent pipeline",
+      "sectionMarker": "Architecture",
+      "image": "images/02-agent-pipeline.png",
+      "imageFullBleed": false
     },
     {
       "type": "two-column",
       "title": "AutoRAG — retrieval-augmented regulatory knowledge",
       "sectionMarker": "AutoRAG",
       "leftLabel": "How It Works",
-      "rightLabel": "Corpus (9 documents)",
+      "rightLabel": "The 9-Document Corpus",
       "leftItems": [
-        "OGX vector store with Milvus + nomic-embed-text-v1.5 embeddings",
-        "UnderwritingAgent: 2 LLM tool-call queries (eligibility + industry guidance)",
-        "LoanDecisionAgent: 1 internal auto-call on decline path (ECOA adverse action)",
+        "OGX vector store — Milvus + nomic-embed-text-v1.5 embeddings",
+        "UnderwritingAgent: 1 LLM tool call → internally 2 AutoRAG queries (eligibility rules + industry guidance)",
+        "LoanDecisionAgent: internal auto-call on decline path (ECOA adverse action via retrieve_regulatory_guidance)",
         "max_num_results=3 per query — focused, low-latency retrieval",
-        "Graceful degradation: if AutoRAG is unavailable, falls back to static eligibility_rules.json"
+        "Graceful degradation: falls back to static eligibility_rules.json if AutoRAG unavailable"
       ],
       "rightItems": [
-        "SBA eligibility + DSCR requirements",
+        "SBA general eligibility + DSCR requirements",
         "Collateral requirements + LTV table",
         "Prohibited business types (13 CFR § 120.110)",
-        "ECOA / Reg B adverse action notice rules",
+        "Adverse action notice rules (ECOA / Reg B)",
         "Prohibited NAICS codes (30 codes)",
         "Industry risk assessment guide",
         "Risk tier + rate pricing guide",
-        "Applicant FAQ (20 Q&A)",
-        "Reapplication guidance"
+        "Applicant FAQ (20 Q&A) + reapplication guidance"
       ]
     },
     {
-      "type": "content",
-      "title": "Callbacks — policy enforcement at every lifecycle point",
+      "type": "table",
+      "title": "Callbacks — guardrails at every lifecycle point",
       "sectionMarker": "Safety",
-      "icon": "shield",
-      "bullets": [
-        "**before_agent** — extract_request_id: parses loan ID from user messages, stores inline documents for later injection",
-        "**before_tool** — halt/skip guard: blocks tool execution if process is halted, completed, or if pricing should be skipped for ineligible loans",
-        "**before_model** — inject_document: injects PDF/image documents into the LLM request context for DocumentExtractionAgent",
-        "**after_agent** — state logging: persists every sub-agent output to SQLite via ProcessStateService",
-        "**after_agent** — LLM-as-Judge: validates trajectory correctness, grounding, and response completeness on every orchestrator turn"
-      ]
+      "headers": ["Hook", "Callback", "What It Does"],
+      "rows": [
+        ["before_agent", "extract_request_id", "Parses loan ID (SBL-YYYY-XXXXX) from user message; stores inline documents for later injection"],
+        ["before_tool", "halt / skip guard", "Blocks execution if process is halted, completed, or pricing should be skipped (INELIGIBLE)"],
+        ["before_model", "inject_document", "Injects PDF/image into LLM request context — DocumentExtractionAgent only"],
+        ["after_agent", "state_logging", "Persists sub-agent output to SQLite; detects INELIGIBLE → flags PricingAgent skip"],
+        ["after_agent", "llm_judge_gate", "Second LLM call validates trajectory, grounding, completeness. Fail → response blocked"]
+      ],
+      "note": "LLM-as-Judge: checks tool order, verifies all numbers match structured outputs, confirms nothing missing. Fails closed — blocked response, not hallucinated data."
     },
     {
       "type": "two-column",
-      "title": "Repair & resume — surviving failures and restarts",
+      "title": "Repair and resume — surviving failures and restarts",
       "sectionMarker": "Resilience",
-      "leftLabel": "State Management",
+      "leftLabel": "Three-Layer State",
       "rightLabel": "Recovery Scenarios",
       "leftItems": [
-        "ProcessStateService: SQLite-backed service tracking overall_status, current_step, and per-agent step data",
-        "Dual-write: ADK session state + SQLite on every sub-agent completion",
-        "check_process_status: reloads all completed step data from SQLite into a fresh ADK session",
-        "_load_step_data_from_db(): cross-turn SQLite fallback inside finalize_loan_decision"
+        "Layer 1: ADK session state — in-memory, fast, lost on pod restart",
+        "Layer 2: SQLite via ProcessStateService — persistent on PVC, full model_dump() of every agent output",
+        "Layer 3: check_process_status — always first tool call, bridges SQLite → ADK session on resume",
+        "Layer 4: _load_step_data_from_db() — last-resort fallback inside finalize_loan_decision for cross-turn sessions"
       ],
       "rightItems": [
-        "Pod restart between pricing and approval → SQLite reloads completed steps",
-        "Missing data detected mid-pipeline → HALT, ask user, resume from failed step",
-        "User returns hours later in a new session → check_process_status picks up where it left off",
-        "Approval arrives in a fresh API session → _load_step_data_from_db() loads all prior outputs from SQLite"
+        "Pod restart between pricing and approval → SQLite reloads completed steps into fresh session",
+        "Missing data mid-pipeline → agent halts, asks user, resumes from exact step",
+        "User returns hours later in new session → check_process_status picks up where it left off",
+        "Approval in fresh API session → _load_step_data_from_db() loads all prior outputs from SQLite"
       ]
     },
     {
       "type": "icon-row",
-      "title": "Deployment — OpenShift with policy-enforced isolation",
-      "sectionMarker": "Deployment",
+      "title": "What this looks like on OpenShift AI",
+      "sectionMarker": "Platform",
       "items": [
         {
+          "icon": "ai_model",
+          "label": "Model Serving (MaaS)",
+          "description": "Gemini 2.5 Flash via OpenAI-compatible endpoint through LiteLLM. Switch to Vertex AI or direct API key by changing env vars"
+        },
+        {
+          "icon": "magnifying_glass",
+          "label": "AutoRAG (OGX)",
+          "description": "9-doc regulatory corpus in Milvus + nomic-embed-text-v1.5. Queried 3× per loan: 2 at underwriting, 1 at loan decision"
+        },
+        {
+          "icon": "flowchart",
+          "label": "MLflow Tracing",
+          "description": "Optional — set MLFLOW_TRACKING_URI and every LiteLLM call auto-logs as spans. Degrades gracefully if unavailable"
+        },
+        {
           "icon": "container",
-          "label": "Container",
-          "description": "FastAPI server exposing OpenAI-compatible /chat/completions endpoint"
-        },
-        {
-          "icon": "padlock_locked",
-          "label": "Secrets",
-          "description": "SealedSecret for LLM API key, ConfigMap for env vars, OpenShell sandbox for network isolation"
-        },
-        {
-          "icon": "cloud",
-          "label": "MaaS Gateway",
-          "description": "Gemini 2.5 Flash via OpenAI-compatible endpoint (LiteLLM); supports Vertex AI and direct Gemini API"
-        },
-        {
-          "icon": "virtual_storage",
-          "label": "Persistence",
-          "description": "PVC at /app/data/ for SQLite state DB — survives pod restarts"
+          "label": "OpenShift AI Deployment",
+          "description": "FastAPI container, PVC for SQLite, ConfigMap for tunable params, SealedSecrets for API key, OpenShell network isolation"
         }
       ]
     },
     {
-      "type": "content",
+      "type": "table",
       "title": "Skills — domain knowledge loaded on demand",
       "sectionMarker": "Knowledge",
-      "icon": "books_multiple",
+      "headers": ["Skill", "When Loaded", "What It Contains"],
+      "rows": [
+        ["loan-orchestration-protocol", "Start of every new application", "Step-by-step HITL workflow: extract → underwrite → price → approve/decline"],
+        ["loan-eligibility-guide", "Explaining eligibility decisions", "5 SBA eligibility rules, risk flags, status definitions"],
+        ["loan-pricing-guide", "After PricingAgent returns", "Risk tier table (Tier 1–4), rate ranges, presentation format, approval prompt"],
+        ["loan-adverse-action", "Before generating a decline letter", "ECOA requirements, decline letter template, tone and compliance guidance"]
+      ],
+      "note": "Only the orchestrator has SkillToolset. Sub-agents are locked: disallow_transfer_to_parent=True, disallow_transfer_to_peers=True."
+    },
+    {
+      "type": "content",
+      "title": "What a real conversation looks like",
+      "sectionMarker": "In Practice",
+      "icon": "flowchart",
       "bullets": [
-        "**loan-orchestration-protocol** — Step-by-step HITL workflow: extract → underwrite → price → approve/decline",
-        "**loan-eligibility-guide** — 5 SBA eligibility rules, risk flags, and status definitions",
-        "**loan-pricing-guide** — Risk tier table (Tier 1–4), rate ranges, presentation format, approval prompt template",
-        "**loan-adverse-action** — ECOA requirements, decline letter template, tone and legal compliance guidance",
-        "Skills are markdown files loaded by the orchestrator via ADK SkillToolset (list_skills → load_skill) — sub-agents never see them"
+        "**User:** \"Process loan SBL-2026-10001: Acme Bakery, $150K, 5 years, $420K revenue...\"",
+        "**Pipeline:** check_process_status → load_skill → DocumentExtractionAgent → UnderwritingAgent + 2 RAG queries → PricingAgent",
+        "**Agent:** \"Acme Bakery qualifies as Tier 2 (Moderate Risk). 7.75% rate, $3,012.43/mo, 60 months. **Do you approve?**\"",
+        "**User:** \"Yes, approve it.\"",
+        "**Pipeline:** check_process_status (reload from SQLite) → LoanDecisionAgent → LLM-as-Judge → response",
+        "**Agent:** \"Loan SBL-2026-10001 approved. Approval letter generated (ref: DL-2026-10001).\""
       ]
     },
     {
       "type": "closing",
       "title": "Loan Processing Agent",
-      "subtitle": "Multi-agent orchestration with regulatory RAG, human-in-the-loop approval, and resilient state management — built on Google ADK.",
+      "subtitle": "Multi-agent orchestration with regulatory RAG, human-in-the-loop approval, and resilient state management — built on Google ADK, running on OpenShift AI.",
       "contact": "rbanda@redhat.com"
     }
   ]
