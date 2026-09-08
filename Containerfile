@@ -27,7 +27,7 @@ COPY --chown=1001:0 small_business_loan_agent/ ./small_business_loan_agent/
 COPY --chown=1001:0 skills/ ./skills/
 COPY --chown=1001:0 tools/ ./tools/
 COPY --chown=1001:0 server.py .
-RUN uv pip install --python /opt/app-root/bin/python3 --no-cache ".[server]"
+RUN uv pip install --python /opt/app-root/bin/python3 --no-cache ".[server,tracing]"
 
 USER 1001
 

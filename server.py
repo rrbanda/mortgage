@@ -26,6 +26,8 @@ Environment variables (all from ConfigMap / Secret in the cluster):
   MAAS_BASE_URL, MAAS_API_KEY, MODEL_NAME   — model backend
   AUTORAG_BASE_URL, AUTORAG_VECTOR_STORE_ID  — RAG retrieval (optional)
   STATE_DB_PATH                              — SQLite path (default /app/data/state.db)
+  MLFLOW_TRACKING_URI                        — MLflow server (optional; tracing disabled if unset)
+  MLFLOW_EXPERIMENT_NAME                     — MLflow experiment (default: small-business-loan-agent)
 """
 
 import json
@@ -47,6 +49,7 @@ from pydantic import BaseModel, Field
 dotenv.load_dotenv()
 
 from small_business_loan_agent.agent import root_agent  # noqa: E402 — dotenv must load first
+from small_business_loan_agent.tracing import enable_tracing  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +63,7 @@ _runner: InMemoryRunner | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runner
+    enable_tracing()
     _runner = InMemoryRunner(agent=root_agent, app_name=APP_NAME)
     logger.info("Agent runner initialized")
     yield
