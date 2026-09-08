@@ -94,13 +94,27 @@ The agent uses ADK's `AgentTool` pattern for sequential orchestration: 1 orchest
 
 **Source**: [`small_business_loan_agent/agent.py`](../small_business_loan_agent/agent.py)
 
-| Agent | `output_key` | Model | Tools | Callbacks |
+| Agent | `output_key` | Model | Tools | RAG Calls | Callbacks |
+|---|---|---|---|---|---|
+| **SmallBusinessLoanOrchestratorAgent** | — | Gemini 2.5 Flash | `SkillToolset`, `check_process_status`, `AgentTool(×4)` | — | `before_agent`: extract request ID · `before_tool`: halt/skip guard · `after_agent`: LLM-as-Judge |
+| **DocumentExtractionAgent** | `DocumentExtractionAgent_output` | Gemini 2.5 Flash | — (no tools) | — | `before_agent`: state check · `before_model`: inject document · `after_agent`: state logging |
+| **UnderwritingAgent** | `UnderwritingAgent_output` | Gemini 2.5 Flash | `get_internal_business_data`, `retrieve_underwriting_context` | 2 AutoRAG queries (LLM tool call) | `before_agent`: state check + load rules · `after_agent`: state logging + INELIGIBLE skip |
+| **PricingAgent** | `PricingAgent_output` | Gemini 2.5 Flash | `calculate_loan_pricing` | — | `before_agent`: state check · `after_agent`: state logging |
+| **LoanDecisionAgent** | `LoanDecisionAgent_output` | Gemini 2.5 Flash | `finalize_loan_decision` | 1 AutoRAG query (internal, auto) | `before_agent`: state check · `after_agent`: state logging + mark complete |
+
+### Multi-Point AutoRAG Integration
+
+The agent makes up to **3 targeted AutoRAG queries** per loan run, pulling only the most relevant regulatory text for each application's specific profile. AutoRAG queries are handled at two different levels:
+
+| Query | Function | Agent | Call Type | AutoRAG → OGX |
 |---|---|---|---|---|
-| **SmallBusinessLoanOrchestratorAgent** | — | Gemini 2.5 Flash | `SkillToolset`, `check_process_status`, `AgentTool(×4)` | `before_agent`: extract request ID · `before_tool`: halt/skip guard · `after_agent`: LLM-as-Judge |
-| **DocumentExtractionAgent** | `DocumentExtractionAgent_output` | Gemini 2.5 Flash | — (no tools) | `before_agent`: state check · `before_model`: inject document · `after_agent`: state logging |
-| **UnderwritingAgent** | `UnderwritingAgent_output` | Gemini 2.5 Flash | `get_internal_business_data`, `retrieve_underwriting_context` | `before_agent`: state check + load rules · `after_agent`: state logging + INELIGIBLE skip |
-| **PricingAgent** | `PricingAgent_output` | Gemini 2.5 Flash | `calculate_loan_pricing` | `before_agent`: state check · `after_agent`: state logging |
-| **LoanDecisionAgent** | `LoanDecisionAgent_output` | Gemini 2.5 Flash | `finalize_loan_decision` | `before_agent`: state check · `after_agent`: state logging + mark complete |
+| SBA eligibility rules | `retrieve_eligibility_rules()` | UnderwritingAgent | **LLM tool call** — the LLM decides to call `retrieve_underwriting_context()` with application facts | `/v1/vector_stores/{id}/search` |
+| Industry risk guidance | `retrieve_industry_guidance()` | UnderwritingAgent | **LLM tool call** — same tool, second query | `/v1/vector_stores/{id}/search` |
+| ECOA adverse action | `retrieve_regulatory_guidance()` | LoanDecisionAgent | **Internal function call** — called automatically inside `finalize_loan_decision()` on INELIGIBLE path | `/v1/vector_stores/{id}/search` |
+
+**Key distinction**: `retrieve_underwriting_context` is a registered ADK tool — the UnderwritingAgent LLM calls it with extracted application facts (industry, years_in_business, annual_revenue, loan_amount, naics_code). Internally it makes 2 AutoRAG searches. By contrast, `retrieve_regulatory_guidance` is called automatically inside `finalize_loan_decision` — the LoanDecisionAgent LLM never sees it as a tool.
+
+**Graceful degradation**: When AutoRAG is not configured (`AUTORAG_BASE_URL` unset), all retrieval functions return empty strings. UnderwritingAgent falls back to static `eligibility_rules.json` loaded by `before_agent_callback_with_state_check`. LoanDecisionAgent generates decline letters without regulatory text. No code change needed — `config.using_autorag()` gates all queries.
 
 ### Safety Features
 
@@ -159,13 +173,17 @@ graph TD
 
     DocAgent --> Missing{critical fields\nmissing?}
     Missing -->|yes| Halt["HALT\nmark_step_for_review\n→ ask user for data"]
-    Missing -->|no| UWAgent["2️⃣ UnderwritingAgent\n2 AutoRAG queries\noutput: UnderwritingReport"]
+    Missing -->|no| UWAgent["2️⃣ UnderwritingAgent\noutput: UnderwritingReport"]
 
-    UWAgent --> Eligible{eligibility_status?}
+    UWAgent -->|"LLM tool call"| RAG_UW["AutoRAG (OGX)\n2 queries:\n① eligibility rules\n② industry guidance"]
+    RAG_UW --> UWResult
+
+    UWResult["UnderwritingReport"] --> Eligible{eligibility_status?}
 
     Eligible -->|"INELIGIBLE"| SkipPrice["PricingAgent SKIPPED\n(auto-skip in callback)"]
     SkipPrice --> Skill3["load_skill\n(loan-adverse-action)"]
-    Skill3 --> LDAgent_Deny["4️⃣ LoanDecisionAgent\n1 AutoRAG query\noutput: DENIED + decline letter"]
+    Skill3 --> LDAgent_Deny["4️⃣ LoanDecisionAgent\noutput: DENIED + decline letter"]
+    LDAgent_Deny -->|"internal auto-call"| RAG_LD["AutoRAG (OGX)\n1 query:\n③ ECOA adverse action"]
 
     Eligible -->|"ELIGIBLE / REVIEW"| Skill2["load_skill\n(loan-pricing-guide)"]
     Skill2 --> PriceAgent["3️⃣ PricingAgent\noutput: PricingResult"]
@@ -174,7 +192,7 @@ graph TD
     Approval -->|"yes"| LDAgent_Approve["4️⃣ LoanDecisionAgent\noutput: APPROVED + approval letter"]
     Approval -->|"no"| Reject["Acknowledge rejection\n(END)"]
 
-    LDAgent_Deny --> Judge["after_agent:\nLLM-as-Judge gate"]
+    RAG_LD --> Judge["after_agent:\nLLM-as-Judge gate"]
     LDAgent_Approve --> Judge
     StatusReply --> Judge
     Judge --> Response["Final Response\nto User"]
@@ -210,13 +228,26 @@ The model factory selects the backend in priority order:
 
 ### AutoRAG Retrieval Details
 
-| Query | Function | Agent | What It Retrieves |
-|---|---|---|---|
-| SBA eligibility rules | `retrieve_eligibility_rules()` | UnderwritingAgent | Operating history, DSCR, loan-to-revenue, collateral thresholds |
-| Industry risk guidance | `retrieve_industry_guidance()` | UnderwritingAgent | NAICS-specific risk flags, prohibited codes (13 CFR § 120.110) |
-| ECOA adverse action | `retrieve_regulatory_guidance()` | LoanDecisionAgent | Adverse action notice requirements, 12 CFR § 1002.9 decline reason codes |
+**Source**: [`shared_libraries/rag_tools.py`](../small_business_loan_agent/shared_libraries/rag_tools.py), [`sub_agents/underwriting/rag_tools.py`](../small_business_loan_agent/sub_agents/underwriting/rag_tools.py)
 
-**Fallback**: When `AUTORAG_BASE_URL` is not set, UnderwritingAgent loads static rules from `eligibility_rules.json`. LoanDecisionAgent generates decline letters without regulatory RAG context.
+The shared `_search()` function calls AutoRAG's OGX API with `max_num_results=3` per query, returning up to 3 text chunks joined by double newlines.
+
+| # | Query | Function | Agent | Call Type | What It Retrieves |
+|---|---|---|---|---|---|
+| 1 | SBA eligibility rules | `retrieve_eligibility_rules()` | UnderwritingAgent | LLM tool call via `retrieve_underwriting_context()` | Operating history, DSCR, loan-to-revenue, collateral thresholds |
+| 2 | Industry risk guidance | `retrieve_industry_guidance()` | UnderwritingAgent | LLM tool call via `retrieve_underwriting_context()` | NAICS-specific risk flags, prohibited codes (13 CFR § 120.110) |
+| 3 | ECOA adverse action | `retrieve_regulatory_guidance()` | LoanDecisionAgent | Internal call inside `finalize_loan_decision()` | Adverse action notice requirements, 12 CFR § 1002.9 decline reason codes |
+| — | Pricing guidance | `retrieve_pricing_guidance()` | (unused) | — | Risk tier definitions, rate benchmarks — **defined but not yet wired** |
+
+**Query construction**: Each retrieval function builds a natural-language query from the application's specific profile. For example, `retrieve_eligibility_rules()` constructs: `"SBA 7(a) loan eligibility requirements for {industry} business with {years_in_business} years operating history, annual revenue {annual_revenue}, loan amount {loan_amount}"`.
+
+**Current vector store**: `vs_23c69157-2907-4576-8fe0-dc491de89d14` (seeded by `tools/seed_autorag.py`)
+
+**Fallback (graceful degradation)**:
+- When `AUTORAG_BASE_URL` is not set: all retrieval functions return empty strings. No code change needed — `config.using_autorag()` gates all queries.
+- When AutoRAG is configured but a search fails (network error, timeout): `_search()` catches `httpx.HTTPError`, logs a warning, and returns empty string. The agent continues without RAG context.
+- UnderwritingAgent fallback: `before_agent_callback_with_state_check` loads static `eligibility_rules.json` into session state when AutoRAG returns empty.
+- LoanDecisionAgent fallback: generates decline letters without regulatory text — still functional, just less compliant.
 
 ### TLS Verification
 
@@ -286,7 +317,7 @@ Which tools and skills are available to each agent.
 
 **Source**: [`small_business_loan_agent/agent.py`](../small_business_loan_agent/agent.py), sub-agent definitions in [`sub_agents/*/agent.py`](../small_business_loan_agent/sub_agents/)
 
-### Tools
+### Tools (LLM-callable)
 
 | Agent | check_process_status | AgentTool (Doc) | AgentTool (UW) | AgentTool (Price) | AgentTool (LD) | get_internal_business_data | retrieve_underwriting_context | calculate_loan_pricing | finalize_loan_decision | SkillToolset |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -297,6 +328,34 @@ Which tools and skills are available to each agent.
 | **LoanDecisionAgent** | | | | | | | | | ● | |
 
 ● = Tool available · (blank) = Not available
+
+### Internal AutoRAG Calls (not LLM-visible)
+
+In addition to the LLM-callable tools above, some tools make **internal AutoRAG queries** that the LLM never sees as separate tool calls:
+
+| Tool | Internal RAG Call | When | AutoRAG Query |
+|---|---|---|---|
+| `retrieve_underwriting_context` | `retrieve_eligibility_rules()` | Always (query 1 of 2) | SBA eligibility rules matching application profile |
+| `retrieve_underwriting_context` | `retrieve_industry_guidance()` | Always (query 2 of 2) | Industry-specific risk and NAICS ineligibility |
+| `finalize_loan_decision` | `retrieve_regulatory_guidance()` | INELIGIBLE path only | ECOA/Reg B adverse action notice requirements |
+
+The LLM sees `retrieve_underwriting_context` as ONE tool returning combined context. Internally it makes 2 separate AutoRAG searches. Similarly, `finalize_loan_decision` calls `retrieve_regulatory_guidance` automatically on the decline path — the LoanDecisionAgent LLM never sees a separate RAG tool.
+
+### Cross-Turn SQLite Fallback in `finalize_loan_decision`
+
+When a user approves in a fresh session (different from the one that ran underwriting/pricing), ADK session state may be empty. The `finalize_loan_decision` tool handles this via `_load_step_data_from_db()`:
+
+```
+finalize_loan_decision()
+  ├── Try: tool_context.state["DocumentExtractionAgent_output"]
+  │     └── Empty? → Load from SQLite via ProcessStateService
+  ├── Try: tool_context.state["UnderwritingAgent_output"]
+  │     └── Empty? → Load from SQLite
+  └── Try: tool_context.state["PricingAgent_output"]
+        └── Empty? → Load from SQLite
+```
+
+This ensures the approval letter can be generated even if the agent pod restarted between pricing and user approval.
 
 **Key design principle**: Only the orchestrator has `AgentTool` wrappers and `SkillToolset`. Sub-agents have `disallow_transfer_to_parent=True` and `disallow_transfer_to_peers=True` — they cannot autonomously transfer control. Each sub-agent has only the tools it needs for its specific job.
 
@@ -378,6 +437,16 @@ Every sub-agent execution is also persisted to SQLite via `ProcessStateService` 
 
 This dual-write enables **repair & resume**: if a pod restarts or the user returns later, `check_process_status` reloads all completed step data from SQLite into the new ADK session.
 
+### Cross-Turn SQLite Fallback
+
+Even with `check_process_status` reloading data, edge cases exist where session state is empty when `finalize_loan_decision` runs (e.g., the user's "yes" arrives in a fresh API session). The tool has a built-in fallback via `_load_step_data_from_db()` ([`loan_decision/tools.py`](../small_business_loan_agent/sub_agents/loan_decision/tools.py)):
+
+1. Try `tool_context.state["DocumentExtractionAgent_output"]` → if empty, load from SQLite
+2. Try `tool_context.state["UnderwritingAgent_output"]` → if empty, load from SQLite
+3. Try `tool_context.state["PricingAgent_output"]` → if empty, load from SQLite
+
+This ensures the approval or decline letter can always be generated regardless of session continuity.
+
 ### LLM-as-Judge Quality Gate
 
 After the orchestrator produces its final response, the `llm_judge_gate` after-agent callback makes a second LLM call to validate the response:
@@ -400,6 +469,7 @@ sequenceDiagram
     participant CPS as check_process_status
     participant Doc as DocumentExtractionAgent
     participant UW as UnderwritingAgent
+    participant RAG as AutoRAG (OGX)
     participant Price as PricingAgent
     participant LD as LoanDecisionAgent
     participant Judge as LLM-as-Judge
@@ -423,7 +493,11 @@ sequenceDiagram
 
     Orch->>UW: AgentTool call
     UW->>UW: get_internal_business_data()
-    UW->>UW: retrieve_underwriting_context() [2 RAG queries]
+    Note right of UW: LLM calls retrieve_underwriting_context()
+    UW->>RAG: Query ①: SBA eligibility rules for this profile
+    RAG-->>UW: ≤3 policy chunks
+    UW->>RAG: Query ②: industry risk + NAICS ineligibility
+    RAG-->>UW: ≤3 guidance chunks
     UW-->>Orch: UnderwritingReport
     UW->>DB: step completed + data
     Note right of DB: state.UnderwritingAgent_output
@@ -441,16 +515,24 @@ sequenceDiagram
         Judge-->>Orch: JudgeVerdict {is_valid: true}
 
         User->>Orch: "yes"
+        Note right of Orch: May be new session (pod restart)
+        Orch->>CPS: check_process_status()
+        CPS->>DB: load completed steps into session state
         Orch->>LD: AgentTool call
+        Note right of LD: _load_step_data_from_db() if session empty
         LD->>LD: finalize_loan_decision()
         LD-->>Orch: LoanDecisionResult (APPROVED)
         LD->>DB: step completed + mark_process_complete
+
     else INELIGIBLE
         Note right of UW: after_agent: auto-skip PricingAgent
         UW->>DB: PricingAgent status=skipped
         Orch->>Orch: load_skill("loan-adverse-action")
         Orch->>LD: AgentTool call
-        LD->>LD: finalize_loan_decision() [1 RAG query]
+        LD->>LD: finalize_loan_decision()
+        Note right of LD: Internal auto-call: retrieve_regulatory_guidance()
+        LD->>RAG: Query ③: ECOA adverse action notice requirements
+        RAG-->>LD: ≤3 regulatory chunks
         LD-->>Orch: LoanDecisionResult (DENIED)
         LD->>DB: step completed + mark_process_complete
     end

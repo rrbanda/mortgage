@@ -39,10 +39,10 @@ Tell-Show-Tell format for each architecture diagram. Use these as talking points
 - **check_process_status** is ALWAYS the first tool call. It checks SQLite: is this a new application, a resume, a status check, or already completed? This is the repair & resume mechanism
 - **load_skill("loan-orchestration-protocol")** — the orchestrator loads the full workflow protocol as domain knowledge before doing anything. This keeps the LLM on-script
 - **DocumentExtractionAgent** — Gemini's multimodal capability reads the loan application (text or PDF). The `inject_document_into_request` before-model callback handles the document injection. Returns a structured `LoanApplicationData` Pydantic model
-- **UnderwritingAgent** — makes TWO AutoRAG queries: one for SBA eligibility rules matching this application's profile, one for industry-specific risk guidance. Falls back to static JSON rules if AutoRAG isn't configured. Returns an `UnderwritingReport` with ELIGIBLE, INELIGIBLE, or REVIEW
+- **UnderwritingAgent** — the LLM calls `retrieve_underwriting_context` as a tool, passing in the extracted application facts — industry, years in business, revenue, loan amount, NAICS code. Internally that one tool call makes TWO targeted AutoRAG queries to OGX: one for SBA eligibility rules matching this profile, one for industry-specific risk and NAICS ineligibility codes. Each query returns up to 3 chunks from the 9-document regulatory corpus. If AutoRAG isn't configured, it falls back to static JSON rules. Returns an `UnderwritingReport` with ELIGIBLE, INELIGIBLE, or REVIEW
 - **The branch point** — this is critical:
   - **ELIGIBLE/REVIEW**: PricingAgent calculates the rate, then the orchestrator STOPS and asks "Do you approve?" — genuine HITL
-  - **INELIGIBLE**: PricingAgent is auto-skipped (both in the before-tool callback and after-agent state callback), the orchestrator loads the adverse-action skill, and LoanDecisionAgent generates an ECOA-compliant decline letter with a third RAG query for regulatory guidance
+  - **INELIGIBLE**: PricingAgent is auto-skipped (both in the before-tool callback and after-agent state callback), the orchestrator loads the adverse-action skill, and LoanDecisionAgent calls `finalize_loan_decision`. Inside that tool — not as a separate LLM tool call — `retrieve_regulatory_guidance` automatically queries AutoRAG for ECOA/Regulation B text. The decline letter is grounded in actual regulatory requirements, not just the LLM's training
 - **LLM-as-Judge** — after EVERY orchestrator response, the `llm_judge_gate` makes a second LLM call that checks trajectory correctness, data grounding, and completeness. If it fails, the response is blocked. This is a financial application — wrong numbers are unacceptable
 
 ### TELL (key takeaway)
@@ -202,7 +202,8 @@ check_process_status → load_skill("loan-orchestration-protocol")
 
 - "Notice `check_process_status` is always the first tool call — it's the state machine entry point"
 - "The orchestrator loaded `loan-orchestration-protocol` skill before calling any agents — it's reading the bank's workflow protocol"
-- "Two AutoRAG queries in underwriting — one for eligibility policy, one for industry risk. These are targeted, not generic"
+- "Two AutoRAG queries in underwriting — one for eligibility policy, one for industry risk. These are targeted, not generic — the tool builds queries from the actual application facts like industry, years in business, and NAICS code"
+- "On the decline path, notice the ECOA regulatory text was retrieved automatically inside `finalize_loan_decision` — the LLM didn't have to decide to call a RAG tool, it just happened. Three queries total across the pipeline, each hitting OGX and returning up to 3 chunks"
 - "The HITL pause is real — the orchestrator stops and waits for my explicit 'yes' before generating the approval letter"
 - "For the decline, notice PricingAgent was automatically skipped — the before-tool callback saw INELIGIBLE and blocked it"
 - "The LLM-as-Judge checked the response before I saw it — trajectory correct, data grounded, response complete"
