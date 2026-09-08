@@ -1,0 +1,182 @@
+{
+  "title": "Loan Agent — Multi-Agent Architecture on Google ADK",
+  "slides": [
+    {
+      "type": "title",
+      "title": "Loan Processing Agent",
+      "subtitle": "Multi-Agent Orchestration with Google ADK, AutoRAG, and Human-in-the-Loop",
+      "presenter": "Raghu Banda",
+      "presenter_title": "Red Hat AI",
+      "date": ""
+    },
+    {
+      "type": "stats",
+      "title": "End-to-end loan processing — fully automated, fully auditable",
+      "sectionMarker": "At a Glance",
+      "stats": [
+        { "value": "1 + 4", "label": "One orchestrator agent coordinates four specialized sub-agents via ADK AgentTool" },
+        { "value": "AutoRAG", "label": "9-doc regulatory corpus (SBA, ECOA, Reg B) retrieved at underwriting and decision time" },
+        { "value": "HITL", "label": "Human-in-the-loop pause after pricing — no loan approved without explicit user consent" },
+        { "value": "Repair", "label": "SQLite-backed state persistence enables repair & resume across pod restarts and sessions" }
+      ]
+    },
+    {
+      "type": "icon-row",
+      "title": "Why a multi-agent architecture?",
+      "sectionMarker": "Design",
+      "items": [
+        {
+          "icon": "brain",
+          "label": "Separation of Concerns",
+          "description": "Each sub-agent has one job, its own prompt, its own output schema, and only the tools it needs"
+        },
+        {
+          "icon": "shield",
+          "label": "Guardrails at Every Layer",
+          "description": "before_agent, before_tool, before_model, and after_agent callbacks enforce policy at every step"
+        },
+        {
+          "icon": "magnifying_glass",
+          "label": "LLM-as-Judge Gate",
+          "description": "Every orchestrator response is validated for trajectory, grounding, and completeness before reaching the user"
+        },
+        {
+          "icon": "storage",
+          "label": "Dual-Write State",
+          "description": "ADK session state + SQLite persistence — the agent can survive restarts and resume from any checkpoint"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "The agent roster — 5 agents, each with a specific role",
+      "sectionMarker": "Pipeline",
+      "headers": ["Agent", "Role", "Output", "RAG"],
+      "rows": [
+        ["Orchestrator", "Coordinates the full pipeline, loads skills, manages HITL", "—", "—"],
+        ["DocumentExtractionAgent", "Extracts structured data from loan applications (PDF/text)", "LoanApplicationData", "—"],
+        ["UnderwritingAgent", "Validates data, checks SBA eligibility, assesses risk", "UnderwritingReport", "2 queries"],
+        ["PricingAgent", "Calculates interest rate, monthly payment, risk tier", "PricingResult", "—"],
+        ["LoanDecisionAgent", "Generates approval or decline letters with regulatory compliance", "LoanDecisionResult", "1 query"]
+      ]
+    },
+    {
+      "type": "content",
+      "title": "The happy path — from application to approval in one conversation",
+      "sectionMarker": "Pipeline",
+      "icon": "flowchart",
+      "bullets": [
+        "**Step 1** — User submits a loan application → check_process_status initializes tracking in SQLite",
+        "**Step 2** — DocumentExtractionAgent parses the application into structured LoanApplicationData",
+        "**Step 3** — UnderwritingAgent queries AutoRAG for SBA eligibility rules and industry guidance, then validates",
+        "**Step 4** — PricingAgent calculates rate, monthly payment, and total interest based on risk tier",
+        "**Step 5** — Orchestrator presents pricing and pauses for human approval (HITL)",
+        "**Step 6** — User approves → LoanDecisionAgent generates a formal approval letter",
+        "**Quality gate** — LLM-as-Judge validates the entire response before it reaches the user"
+      ]
+    },
+    {
+      "type": "two-column",
+      "title": "AutoRAG — retrieval-augmented regulatory knowledge",
+      "sectionMarker": "AutoRAG",
+      "leftLabel": "How It Works",
+      "rightLabel": "Corpus (9 documents)",
+      "leftItems": [
+        "OGX vector store with Milvus + nomic-embed-text-v1.5 embeddings",
+        "UnderwritingAgent: 2 LLM tool-call queries (eligibility + industry guidance)",
+        "LoanDecisionAgent: 1 internal auto-call on decline path (ECOA adverse action)",
+        "max_num_results=3 per query — focused, low-latency retrieval",
+        "Graceful degradation: if AutoRAG is unavailable, falls back to static eligibility_rules.json"
+      ],
+      "rightItems": [
+        "SBA eligibility + DSCR requirements",
+        "Collateral requirements + LTV table",
+        "Prohibited business types (13 CFR § 120.110)",
+        "ECOA / Reg B adverse action notice rules",
+        "Prohibited NAICS codes (30 codes)",
+        "Industry risk assessment guide",
+        "Risk tier + rate pricing guide",
+        "Applicant FAQ (20 Q&A)",
+        "Reapplication guidance"
+      ]
+    },
+    {
+      "type": "content",
+      "title": "Callbacks — policy enforcement at every lifecycle point",
+      "sectionMarker": "Safety",
+      "icon": "shield",
+      "bullets": [
+        "**before_agent** — extract_request_id: parses loan ID from user messages, stores inline documents for later injection",
+        "**before_tool** — halt/skip guard: blocks tool execution if process is halted, completed, or if pricing should be skipped for ineligible loans",
+        "**before_model** — inject_document: injects PDF/image documents into the LLM request context for DocumentExtractionAgent",
+        "**after_agent** — state logging: persists every sub-agent output to SQLite via ProcessStateService",
+        "**after_agent** — LLM-as-Judge: validates trajectory correctness, grounding, and response completeness on every orchestrator turn"
+      ]
+    },
+    {
+      "type": "two-column",
+      "title": "Repair & resume — surviving failures and restarts",
+      "sectionMarker": "Resilience",
+      "leftLabel": "State Management",
+      "rightLabel": "Recovery Scenarios",
+      "leftItems": [
+        "ProcessStateService: SQLite-backed service tracking overall_status, current_step, and per-agent step data",
+        "Dual-write: ADK session state + SQLite on every sub-agent completion",
+        "check_process_status: reloads all completed step data from SQLite into a fresh ADK session",
+        "_load_step_data_from_db(): cross-turn SQLite fallback inside finalize_loan_decision"
+      ],
+      "rightItems": [
+        "Pod restart between pricing and approval → SQLite reloads completed steps",
+        "Missing data detected mid-pipeline → HALT, ask user, resume from failed step",
+        "User returns hours later in a new session → check_process_status picks up where it left off",
+        "Approval arrives in a fresh API session → _load_step_data_from_db() loads all prior outputs from SQLite"
+      ]
+    },
+    {
+      "type": "icon-row",
+      "title": "Deployment — OpenShift with policy-enforced isolation",
+      "sectionMarker": "Deployment",
+      "items": [
+        {
+          "icon": "container",
+          "label": "Container",
+          "description": "FastAPI server exposing OpenAI-compatible /chat/completions endpoint"
+        },
+        {
+          "icon": "padlock_locked",
+          "label": "Secrets",
+          "description": "SealedSecret for LLM API key, ConfigMap for env vars, OpenShell sandbox for network isolation"
+        },
+        {
+          "icon": "cloud",
+          "label": "MaaS Gateway",
+          "description": "Gemini 2.5 Flash via OpenAI-compatible endpoint (LiteLLM); supports Vertex AI and direct Gemini API"
+        },
+        {
+          "icon": "virtual_storage",
+          "label": "Persistence",
+          "description": "PVC at /app/data/ for SQLite state DB — survives pod restarts"
+        }
+      ]
+    },
+    {
+      "type": "content",
+      "title": "Skills — domain knowledge loaded on demand",
+      "sectionMarker": "Knowledge",
+      "icon": "books_multiple",
+      "bullets": [
+        "**loan-orchestration-protocol** — Step-by-step HITL workflow: extract → underwrite → price → approve/decline",
+        "**loan-eligibility-guide** — 5 SBA eligibility rules, risk flags, and status definitions",
+        "**loan-pricing-guide** — Risk tier table (Tier 1–4), rate ranges, presentation format, approval prompt template",
+        "**loan-adverse-action** — ECOA requirements, decline letter template, tone and legal compliance guidance",
+        "Skills are markdown files loaded by the orchestrator via ADK SkillToolset (list_skills → load_skill) — sub-agents never see them"
+      ]
+    },
+    {
+      "type": "closing",
+      "title": "Loan Processing Agent",
+      "subtitle": "Multi-agent orchestration with regulatory RAG, human-in-the-loop approval, and resilient state management — built on Google ADK.",
+      "contact": "rbanda@redhat.com"
+    }
+  ]
+}
