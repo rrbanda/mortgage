@@ -28,7 +28,7 @@ The resume capability is backed by ProcessStateService — a SQLite-based persis
 
 The single-agent approach was our first attempt, and it fell apart for three concrete reasons. First, prompt interference — when you put document extraction instructions, underwriting rules, pricing calculations, and letter generation templates in one system prompt, the model starts mixing reasoning modes. We saw it pull field values from the wrong stage, apply pricing logic during underwriting, and hallucinate interest rates before PricingAgent even ran. Second, tool sprawl — a single agent with all eight tools (check_process_status, get_internal_business_data, retrieve_underwriting_context, calculate_loan_pricing, finalize_loan_decision, list_skills, load_skill, load_skill_resource) makes unpredictable tool choices. Third, testability — you can't unit-test underwriting logic if it's entangled with pricing and decision generation.
 
-The ADK AgentTool pattern solves this cleanly. In agent.py, the root_agent is an LlmAgent with five tools: SkillToolset, check_process_status as a standalone function tool, and four AgentTool wrappers — AgentTool(document_extraction_agent), AgentTool(underwriting_agent), AgentTool(pricing_agent), AgentTool(loan_decision_agent). From the orchestrator LLM's perspective, calling "DocumentExtractionAgent" is just a tool call with arguments. But ADK spins up a full LlmAgent with its own system prompt, model context, and output_schema. The sub-agent runs to completion, returns structured output, and ADK writes it to session state under the agent's output_key — for example, "DocumentExtractionAgent_output".
+The ADK AgentTool pattern solves this cleanly. In agent.py, the root_agent is an LlmAgent with five tools: SkillToolset, check_process_status as a standalone function tool, and four AgentTool wrappers — AgentTool(document_extraction_agent), AgentTool(underwriting_agent), AgentTool(pricing_agent), AgentTool(loan_decision_agent). From the orchestrator LLM's perspective, calling "DocumentExtractionAgent" is just a tool call with arguments. But ADK spins up a full LlmAgent with its own system prompt, model context, and output_schema. The sub-agent runs to completion, returns structured output, and ADK writes it to session state under the agent's output_key.
 
 The tool isolation is explicit. UnderwritingAgent's tools list is exactly two items: get_internal_business_data (mock CRM lookup) and retrieve_underwriting_context (the AutoRAG wrapper). PricingAgent has one tool: calculate_loan_pricing. LoanDecisionAgent has one: finalize_loan_decision. None of them have access to each other's tools, to SkillToolset, or to check_process_status. And they're locked down with disallow_transfer_to_parent=True and disallow_transfer_to_peers=True — they can't autonomously decide to call another agent or hand control back.
 
@@ -36,7 +36,17 @@ Each sub-agent also has a Pydantic output_schema — LoanApplicationData, Underw
 
 ---
 
-### Slide 4: The Pipeline Diagram
+### Slide 4: Tool and Skill Access Matrix
+
+This diagram is the access control contract. Top section is LLM-callable tools — what each agent can invoke directly. Green dot means available, empty means not. The orchestrator has check_process_status, AgentTool wrappers, and SkillToolset. DocumentExtractionAgent has zero tools — it's pure extraction from the injected document. UnderwritingAgent has get_internal_business_data and retrieve_underwriting_context. PricingAgent has calculate_loan_pricing. LoanDecisionAgent has finalize_loan_decision.
+
+Bottom section is the critical distinction: internal AutoRAG calls. These are not LLM-visible tools. retrieve_underwriting_context, when called by the LLM, internally makes two separate AutoRAG queries — retrieve_eligibility_rules and retrieve_industry_guidance. finalize_loan_decision internally calls retrieve_regulatory_guidance on the decline path. The LLM never knows these RAG calls happen — it just sees enriched tool responses. Three AutoRAG queries total per loan, none of them LLM-initiated.
+
+The four skills at the bottom — loan-orchestration-protocol, loan-eligibility-guide, loan-pricing-guide, loan-adverse-action — are loaded via SkillToolset and only accessible to the orchestrator. Sub-agents don't know skills exist.
+
+---
+
+### Slide 5: The Pipeline Diagram
 
 Let me walk through the diagram in detail. Everything starts with check_process_status — literally every turn. This tool takes the loan_request_id from session state, queries SQLite via ProcessStateService, and returns one of four actions: "proceed_to_analysis" for new applications, "resume" for partially completed ones, "return_status" for status checks, or "pending_approval" when we're waiting for HITL.
 
@@ -54,7 +64,7 @@ The LLM-as-Judge fires after every orchestrator turn. It's a second litellm.acom
 
 ---
 
-### Slide 5: AutoRAG
+### Slide 6: AutoRAG
 
 The fundamental question was: where does regulatory knowledge live? Fine-tuning — but regulations change and retraining is expensive. System prompt stuffing — but 78KB of regulatory text burns context window and dilutes the instruction. RAG — retrieve just the relevant chunks at decision time. We went with RHOAI's AutoRAG service backed by OGX.
 
@@ -68,7 +78,7 @@ The fallback: if AutoRAG is completely unavailable, the before_agent callback fo
 
 ---
 
-### Slide 6: Callbacks and Safety
+### Slide 7: Callbacks and Safety
 
 ADK gives you four callback hooks on every LlmAgent, and we use all four.
 
@@ -86,7 +96,17 @@ If the judge call itself fails — network error, model error — callback catch
 
 ---
 
-### Slide 7: Repair and Resume
+### Slide 8: Data Flow Diagram
+
+This diagram shows what actually happens as data moves through the pipeline. Follow it left-to-right. User request enters the orchestrator, which always starts with check_process_status. On "proceed", DocumentExtractionAgent runs first — pure LLM extraction, no tools. Then UnderwritingAgent with two AutoRAG queries shown explicitly — Query 1 for eligibility rules, Query 2 for industry guidance, each returning ≤3 chunks from the Milvus vector store.
+
+The diamond is the branch point — eligibility status. On ELIGIBLE, we flow through the HITL pause (human approval) to LoanDecisionAgent for an approval letter. On INELIGIBLE, PricingAgent is explicitly SKIPPED — you can see it greyed out — and we go straight to LoanDecisionAgent (DENIED) with a third AutoRAG query for ECOA/Reg B adverse action text.
+
+The bottom bar is critical — Session State. Each agent writes to a named key with its Pydantic model output. DocumentExtractionAgent_output gets LoanApplicationData, UnderwritingAgent_output gets UnderwritingReport plus RAG context, and so on. The note at the bottom: "Parallel write: all outputs also persisted to SQLite via ProcessStateService." That dual-write is what makes repair and resume possible.
+
+---
+
+### Slide 9: Repair and Resume
 
 State management has three layers, and understanding why you need all three matters.
 
@@ -102,23 +122,41 @@ Status transitions are strict: active → pending_approval → completed (or fai
 
 ---
 
-### Slide 8: OpenShift AI Platform
+### Slide 10: OpenShift AI Deployment Architecture
 
-Model Serving — MaaS. The model factory in gemini_custom.py has get_model() that checks config.using_maas() — bool(MAAS_BASE_URL and MAAS_API_KEY). If true, returns MaaSLiteLlm from the rh-maas-litellm package — custom ADK model class wrapping LiteLLM with MaaS config: base URL, API key, URL path template (default: /gemini-external/{model}/v1), SSL settings. URL path is templated — {model} replaced at call time. If MaaS isn't configured, falls back to GeminiPreview — subclass of ADK's Gemini supporting both GOOGLE_API_KEY and GCP ADC. All five agents and the judge use the same factory. Change MAAS_BASE_URL in ConfigMap → entire system switches backends, no code change.
+This is the pod-level view. The agent runs as a FastAPI container on OpenShift AI with an OpenShell init container handling network isolation — it sets up egress rules so the pod can only reach MaaS Gateway and AutoRAG endpoints, nothing else. The ConfigMap injects MODEL_NAME, MAAS_BASE_URL, AUTORAG_BASE_URL, AUTORAG_VECTOR_STORE_ID, BANK_NAME, rate tier values, and DEFAULT_LOAN_TERM_MONTHS. SealedSecrets handle MAAS_API_KEY and OpenShell TLS certs.
 
-Production detail: MaaS returns gzip+chunked encoding that triggers an httpcore read-stall bug. We force "Accept-Encoding: identity" on all LiteLLM requests to work around this.
+The PVC at /app/data/ holds state.db — the SQLite database backing ProcessStateService. This is what survives pod restarts. The container image is built from a standard Containerfile with FastAPI, uvicorn, and all dependencies. Endpoints exposed: /chat/completions and /v1/chat/completions for OpenAI-compatible chat, /health for readiness probes, and /.well-known/agent-card.json for A2A agent discovery.
+
+---
+
+### Slide 11: External Connectivity
+
+This diagram shows the three external connections the agent pod makes. First, MaaS Gateway — the agent's model factory in gemini_custom.py calls get_model(), which checks config.using_maas(). If MAAS_BASE_URL and MAAS_API_KEY are set, it returns MaaSLiteLlm wrapping LiteLLM with a URL path template (/gemini-external/{model}/v1). All five agents and the LLM-as-Judge use this same factory. Important production detail: MaaS returns gzip+chunked encoding that triggers an httpcore read-stall bug, so we force "Accept-Encoding: identity" on all requests.
+
+Second, AutoRAG (OGX) — rag_tools.py uses httpx with a 30-second timeout to POST queries to /v1/vector_stores/{id}/search. The Milvus vector store uses nomic-embed-text-v1.5 embeddings across a 9-document regulatory corpus.
+
+Third, SQLite state.db on PVC — not an external service, but persistent storage that outlives the pod. state_service.py uses sqlite3 directly.
+
+The Open WebUI (AgentHive) connection shows the ingress — users talk to the agent via /chat/completions endpoints. This is an OpenAI-compatible API, so any client that speaks the completions protocol works.
+
+---
+
+### Slide 12: RHOAI Capabilities
+
+Model Serving — MaaS. The model factory in gemini_custom.py has get_model() that checks config.using_maas() — bool(MAAS_BASE_URL and MAAS_API_KEY). If true, returns MaaSLiteLlm from the rh-maas-litellm package — custom ADK model class wrapping LiteLLM with MaaS config: base URL, API key, URL path template. If MaaS isn't configured, falls back to GeminiPreview — subclass of ADK's Gemini supporting both GOOGLE_API_KEY and GCP ADC. All five agents and the judge use the same factory. Change MAAS_BASE_URL in ConfigMap → entire system switches backends, no code change.
 
 AutoRAG — OGX. Two env vars: AUTORAG_BASE_URL, AUTORAG_VECTOR_STORE_ID. API: POST to /v1/vector_stores/{id}/search, JSON body with query and max_num_results. httpx with 30-second timeout, configurable SSL. Corpus seeded via tools/seed_autorag.py from tools/corpus/ — 9 markdown files by domain.
 
-MLflow Tracing. In tracing.py: enable_tracing() called in FastAPI lifespan handler. Checks MLFLOW_TRACKING_URI — absent = silently skipped. Present = health check (configurable timeout, default 5s) → mlflow.set_tracking_uri() → set_experiment("small-business-loan-agent") → config.enable_async_logging() → mlflow.litellm.autolog(). That autolog call monkey-patches LiteLLM so every completion generates spans with prompts, responses, latency, token counts. Both agent calls and judge go through LiteLLM → full pipeline observability. If MLflow dies after startup, async logging fails silently — agent continues.
+MLflow Tracing. In tracing.py: enable_tracing() called in FastAPI lifespan handler. Checks MLFLOW_TRACKING_URI — absent = silently skipped. Present = health check → mlflow.set_tracking_uri() → set_experiment() → config.enable_async_logging() → mlflow.litellm.autolog(). That autolog call monkey-patches LiteLLM so every completion generates spans with prompts, responses, latency, token counts. Both agent calls and judge go through LiteLLM → full pipeline observability.
 
-Deployment: Containerfile builds FastAPI image. Endpoints: /chat/completions, /v1/chat/completions (OpenAI-compatible), /health (readiness), /.well-known/agent-card.json (A2A discovery). OpenShell init container for network isolation. ConfigMap: MODEL_NAME, MAAS_BASE_URL, AUTORAG vars, BANK_NAME, four rate tier values, DEFAULT_LOAN_TERM_MONTHS. SealedSecrets: MAAS_API_KEY, OpenShell TLS certs. PVC for SQLite.
+Deployment: Containerfile builds FastAPI image. OpenShell init container for network isolation. ConfigMap for tunables. SealedSecrets for credentials. PVC for SQLite state.
 
 Note: EvalHub integration not in this version. Agent uses ADK's adk eval for smoke tests and LLM-as-Judge for runtime quality. EvalHub with systematic eval datasets is on the roadmap.
 
 ---
 
-### Slide 9: Skills
+### Slide 13: Skills
 
 Important distinction between skills and RAG. Skills are workflow knowledge — they tell the LLM how to behave. RAG is reference knowledge — factual grounding for specific decisions.
 
@@ -132,7 +170,7 @@ Skills are baked into the container at /app/skills/. Updating = rebuild image, A
 
 ---
 
-### Slide 10: In Practice
+### Slide 14: In Practice
 
 Tracing through the exact tool sequence. User submits "Process loan SBL-2026-10001: Acme Bakery..." before_agent callback parses "SBL-2026-10001" via regex, stores in session state.
 
@@ -150,7 +188,7 @@ Two user turns. Behind the scenes: 2 check_process_status, 2 skill loads, 4 sub-
 
 ---
 
-### Slide 11: Closing
+### Slide 15: Closing
 
 Key architectural takeaways. Multi-agent works when the problem has genuinely distinct reasoning stages — document extraction, underwriting, pricing, letter generation require different prompts, tools, and output schemas. AgentTool makes this clean.
 

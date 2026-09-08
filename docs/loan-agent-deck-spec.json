@@ -49,6 +49,13 @@
     },
     {
       "type": "image",
+      "title": "Tool and skill access matrix — who can call what",
+      "sectionMarker": "Architecture",
+      "image": "/Users/raghurambanda/workspace/mortgage/docs/images/04-tool-skill-map.png",
+      "imageFullBleed": false
+    },
+    {
+      "type": "image",
       "title": "The four-agent pipeline",
       "sectionMarker": "Architecture",
       "image": "/Users/raghurambanda/workspace/mortgage/docs/images/02-agent-pipeline.png",
@@ -93,6 +100,13 @@
       "note": "LLM-as-Judge: checks tool order, verifies all numbers match structured outputs, confirms nothing missing. Fails closed — blocked response, not hallucinated data."
     },
     {
+      "type": "image",
+      "title": "Data flow and state accumulation through the pipeline",
+      "sectionMarker": "Resilience",
+      "image": "/Users/raghurambanda/workspace/mortgage/docs/images/05-data-flow.png",
+      "imageFullBleed": false
+    },
+    {
       "type": "two-column",
       "title": "Repair and resume — surviving failures and restarts",
       "sectionMarker": "Resilience",
@@ -112,8 +126,22 @@
       ]
     },
     {
+      "type": "image",
+      "title": "OpenShift AI deployment architecture",
+      "sectionMarker": "Platform",
+      "image": "/Users/raghurambanda/workspace/mortgage/docs/images/01-deployment-architecture.png",
+      "imageFullBleed": false
+    },
+    {
+      "type": "image",
+      "title": "External connectivity — MaaS, AutoRAG, SQLite",
+      "sectionMarker": "Platform",
+      "image": "/Users/raghurambanda/workspace/mortgage/docs/images/03-external-connectivity.png",
+      "imageFullBleed": false
+    },
+    {
       "type": "icon-row",
-      "title": "What this looks like on OpenShift AI",
+      "title": "RHOAI capabilities used by this agent",
       "sectionMarker": "Platform",
       "items": [
         {
