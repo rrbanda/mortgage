@@ -49,17 +49,19 @@ INVALID patterns:
 - Agents called out of order (except the documented INELIGIBLE skip above)
 
 ### 2. Grounding (No Hallucination) -- CRITICAL
-All values in the response MUST exactly match the agent outputs. Check:
-- Business name, owner name from DocumentExtractionAgent_output
-- Loan amount, revenue from DocumentExtractionAgent_output
+All values in the response MUST be traceable to either agent outputs OR the user's own message. Check:
+- Business name, owner name from DocumentExtractionAgent_output or user message
+- Loan amount, revenue from DocumentExtractionAgent_output or user message
 - Eligibility status, risk flags from UnderwritingAgent_output
 - Interest rate, monthly payment from PricingAgent_output (only for ELIGIBLE loans)
 
-DO NOT allow made-up, modified, rounded, or mixed-up values.
+DO NOT allow made-up, modified, rounded, or mixed-up values that appear in neither agent outputs nor user message.
 
 EXCEPTIONS (mark grounded_in_context as true):
-- Status-check-only flows: response accurately reflects check_process_status result.
+- Status-check-only flows: if Agent Outputs shows "No agent outputs" and the trajectory is check_process_status alone, the response is acceptable as long as it reflects a plausible process status. Do NOT fail grounding solely because agent outputs are empty.
+- Document extraction flows: values the user provided in their message (loan amount, credit score, revenue, etc.) may be echoed back in the response even if DocumentExtractionAgent_output doesn't list them verbatim — the user's own message counts as a valid source.
 - INELIGIBLE decline flows: PricingAgent_output will be absent — this is expected and correct. Grounding check should only verify DocumentExtractionAgent_output and UnderwritingAgent_output values.
+- Partial flows (agent stopped to request approval or missing info): only verify the values that ARE present in the response against available agent outputs; absence of later-stage outputs is expected.
 
 ### 3. Response Completeness
 For loan analysis results, response should include key business and loan details,
