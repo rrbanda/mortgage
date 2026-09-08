@@ -1,6 +1,6 @@
 # Small Business Loan Agent
 
-A multi-agent system built with the [Google Agent Development Kit (ADK)](https://adk.dev/) that automates small business loan processing at **Cymbal Bank**. It demonstrates sequential multi-agent orchestration, human-in-the-loop approval, LLM-as-Judge validation, RAG-backed eligibility rules, and SQLite-backed repair & resume.
+A multi-agent system built with the [Google Agent Development Kit (ADK)](https://adk.dev/) that automates small business loan processing at **Cymbal Bank**. It demonstrates sequential multi-agent orchestration, human-in-the-loop approval, LLM-as-Judge validation, RAG-backed regulatory knowledge, ADK Agent Skills, and SQLite-backed repair & resume.
 
 Runs locally against a Gemini API key, or fully deployed on Red Hat OpenShift AI via the AgentSandbox operator with OpenShell network enforcement.
 
@@ -14,7 +14,7 @@ Runs locally against a Gemini API key, or fully deployed on Red Hat OpenShift AI
 | **Complexity**       | Advanced                                    |
 | **Agent Type**       | Multi-Agent (1 orchestrator + 4 sub-agents) |
 | **Vertical**         | Financial Services                          |
-| **Framework**        | Google ADK                                  |
+| **Framework**        | Google ADK 2.8.0                            |
 | **Model**            | Gemini 2.5 Flash (configurable via `MODEL_NAME`) |
 
 ### Key Features
@@ -26,127 +26,200 @@ Runs locally against a Gemini API key, or fully deployed on Red Hat OpenShift AI
 | **Structured Output** | Each sub-agent returns validated Pydantic models via `output_schema` / `output_key` |
 | **Human-in-the-Loop (HITL)** | Orchestrator pauses after pricing to present results and wait for explicit user approval |
 | **LLM-as-Judge Gate** | After-agent callback validates trajectory correctness and data grounding before showing responses |
-| **RAG Eligibility Rules** | Underwriting agent retrieves live policy rules from AutoRAG vector store (falls back to static JSON locally) |
+| **ADK Agent Skills** | Orchestrator loads domain knowledge from `SKILL.md` artifacts via `SkillToolset` meta-tools |
+| **Multi-Point RAG** | UnderwritingAgent makes 2 targeted queries; LoanDecisionAgent retrieves ECOA guidance — all from a 9-domain regulatory corpus |
 | **Repair & Resume** | SQLite workflow management tracks each step; workflow can pause on errors and resume from checkpoint |
-| **Zero Cloud Dependencies** | State persisted to a local SQLite file — no Firestore, no GCP required for basic usage |
+| **A2A Agent Card** | `/.well-known/agent-card.json` exposes the agent's 10 capabilities for A2A discovery |
 
 ### Agent Flow
 
 ```
-SmallBusinessLoanOrchestratorAgent
-  ├── check_process_status          (SQLite state tool)
-  ├── AgentTool(DocumentExtractionAgent)  →  LoanApplicationData
-  ├── AgentTool(UnderwritingAgent)         →  UnderwritingReport
-  ├── AgentTool(PricingAgent)              →  PricingResult
-  └── AgentTool(LoanDecisionAgent)         →  LoanDecisionResult
+User message
+  └── SmallBusinessLoanOrchestratorAgent
+        ├── check_process_status          (SQLite state)
+        ├── load_skill("loan-orchestration-protocol")   ← ADK Skill
+        ├── AgentTool(DocumentExtractionAgent)  →  LoanApplicationData
+        ├── AgentTool(UnderwritingAgent)         →  UnderwritingReport
+        │     └── retrieve_underwriting_context()
+        │           ├── AutoRAG query 1: eligibility rules
+        │           └── AutoRAG query 2: industry risk guidance
+        ├── [ELIGIBLE/REVIEW path]
+        │     ├── load_skill("loan-pricing-guide")       ← ADK Skill
+        │     ├── AgentTool(PricingAgent)         →  PricingResult
+        │     └── ── HITL pause: present pricing, await approval ──
+        │           └── AgentTool(LoanDecisionAgent) → approval letter
+        └── [INELIGIBLE path]
+              ├── load_skill("loan-adverse-action")      ← ADK Skill
+              └── AgentTool(LoanDecisionAgent)
+                    └── finalize_loan_decision()
+                          └── AutoRAG query 3: ECOA adverse action guidance
 ```
+
+### ADK Skills
+
+The orchestrator loads policy documents on demand from the `skills/` directory using `SkillToolset`. Skills are markdown files the LLM fetches with `load_skill(name)` — they contain bank policy, regulatory requirements, and workflow guidance that stays current without code changes.
+
+| Skill | Loaded When |
+|---|---|
+| `loan-orchestration-protocol` | Start of any new loan application |
+| `loan-eligibility-guide` | When explaining eligibility decisions to users |
+| `loan-pricing-guide` | After PricingAgent returns results, before presenting to user |
+| `loan-adverse-action` | Before LoanDecisionAgent generates a decline letter |
 
 ---
 
 ## B. Demo Prompts
 
-All prompts use fictional business names and people. Loan request IDs follow the format `SBL-YYYY-NNNNN`.
+> **Cluster endpoint:** `https://loan-agent-loan-agent.apps.ocp.qn6c5.sandbox1388.opentlc.com`
+>
+> Use fresh loan IDs for each demo session to avoid state collisions from prior runs.
 
-### Scenario 1 — Complete Application (Happy Path)
+### Scenario 1 — Status Check
 
-Paste in one message. The agent extracts all fields, underwrites, prices, then asks for approval.
+Check the state of any previously submitted application. Uses only `check_process_status` — fast and lightweight.
 
 ```
-Process loan application SBL-2025-00201.
+What is the status of loan application SBL-2026-00201?
+```
+
+**Expected tool sequence:** `check_process_status → load_skill`
+**Expected response:** Reports whether the application is in-progress, which step it's at, or completed.
+
+---
+
+### Scenario 2 — Complete ELIGIBLE Application (Happy Path)
+
+Paste in one message. The agent runs the full pipeline and pauses for approval after pricing.
+
+```
+Process loan application SBL-2026-10001.
 
 Business: Sunrise Bakehouse LLC
 Owner: Morgan Ellis, morgan@sunrisebakehouse.com, 555-0201
-Industry: Retail bakery, 5 years in business, 14 employees
+Industry: Retail bakery (NAICS 311811), 5 years in business, 14 employees
+Address: 100 Main St, Springfield IL 62701
 Financials: $980K annual revenue, $62K net profit, no existing debt
 Loan: $180,000 for 60 months to purchase a commercial deck oven and expand production line
-Collateral: Existing baking equipment, estimated value $140,000
+Collateral: Baking equipment $140,000 + business assets $85,000
 ```
 
-Expected flow: `check_process_status` → `DocumentExtractionAgent` → `UnderwritingAgent` → `PricingAgent` → approval prompt.
+**Expected tool sequence:**
+```
+check_process_status
+→ load_skill("loan-orchestration-protocol")
+→ DocumentExtractionAgent
+→ UnderwritingAgent  [2 AutoRAG queries: eligibility + industry]
+→ load_skill("loan-pricing-guide")
+→ PricingAgent
+→ [approval prompt]
+```
 
-Reply **yes** to trigger `LoanDecisionAgent` and generate the decision letter.
+**Expected outcome:** ELIGIBLE or REVIEW status, Tier 2–3, interest rate 8–10%, monthly payment ~$3,700–$3,800, then pauses for your approval.
+
+Reply **`yes`** to generate the approval letter, or **`no`** to decline.
 
 ---
 
-### Scenario 2 — High-Revenue, Low-Risk Approval
+### Scenario 3 — High-Revenue Low-Risk (Tier 1 Approval)
+
+Strong financials, long operating history — should land Tier 1.
 
 ```
-Process loan application SBL-2025-00202.
+Process loan application SBL-2026-10002.
 
 Business: Blue Ridge Logistics Inc
 Owner: Casey Hartman, casey@blueridgelogistics.com, 555-0202
-Industry: Freight logistics, 9 years in business, 38 employees
+Industry: Freight logistics (NAICS 484110), 9 years in business, 38 employees
+Address: 450 Commerce Blvd, Atlanta GA 30303
 Financials: $4.1M annual revenue, $310K net profit, $120K existing debt (equipment lease)
 Loan: $500,000 for 84 months to purchase two refrigerated delivery trucks
-Collateral: Fleet vehicles and warehouse equipment, estimated value $680,000
+Collateral: Fleet vehicles and warehouse equipment $680,000
 ```
 
-Expected: Tier 1 Low Risk, eligible, interest rate ~6-7%, approval prompt.
+**Expected outcome:** ELIGIBLE, Tier 1 Low Risk, ~6–7% APR.
+
+Reply **`yes`** to generate the approval letter.
 
 ---
 
-### Scenario 3 — Elevated Risk (Newer Business)
+### Scenario 4 — INELIGIBLE Application (Decline Letter)
+
+Gambling business + under 2-year operating history = two hard regulatory bars.
 
 ```
-Process loan application SBL-2025-00203.
+Process loan application SBL-2026-10003.
+
+Business: Lucky Stars Casino Lounge
+Owner: Alex Rivera, alex@luckystars.com, 555-0301
+Industry: Gambling/casino (NAICS 713210), 8 months in business, 5 employees
+Address: 500 Vegas Blvd, Las Vegas NV 89101
+Financials: $420K annual revenue, $18K net profit, no existing debt
+Loan: $300,000 for 60 months for renovations and gaming equipment
+Collateral: Gaming equipment $180,000
+```
+
+**Expected tool sequence:**
+```
+check_process_status
+→ load_skill("loan-orchestration-protocol")
+→ DocumentExtractionAgent
+→ UnderwritingAgent  [2 AutoRAG queries: eligibility + industry]
+→ load_skill("loan-adverse-action")
+→ LoanDecisionAgent  [1 AutoRAG query: ECOA adverse action guidance]
+   PricingAgent: auto-skipped
+```
+
+**Expected outcome:** Decline letter with:
+- Gambling industry prohibited under 13 CFR § 120.110
+- Operating history < 2-year minimum
+- ECOA adverse action notice paragraph
+- Reapplication guidance
+
+---
+
+### Scenario 5 — Elevated Risk / Borderline (REVIEW)
+
+Short history, thin margins, but not disqualifying — lands in REVIEW with elevated rate.
+
+```
+Process loan application SBL-2026-10004.
 
 Business: Pixel & Grain Photography Studio
 Owner: Alex Navarro, alex@pixelandgrain.com, 555-0203
-Industry: Commercial photography, 2 years in business, 3 employees
+Industry: Commercial photography (NAICS 541922), 2 years in business, 3 employees
+Address: 200 Creative Ave, Austin TX 78701
 Financials: $210K annual revenue, $18K net profit, no existing debt
 Loan: $75,000 for 48 months to purchase camera systems and studio lighting
-Collateral: Camera and studio equipment, estimated value $55,000
+Collateral: Camera and studio equipment $55,000
 ```
 
-Expected: Tier 3 Elevated Risk (short operating history, loan-to-revenue ratio), higher interest rate, REVIEW status. Still reaches approval prompt — reply **yes** or **no** to complete.
+**Expected outcome:** REVIEW, Tier 3 Elevated Risk, ~9.5–11% APR. Still reaches approval prompt.
 
 ---
 
-### Scenario 4 — Missing Fields (Repair & Resume Flow)
+### Scenario 6 — Missing Fields (Repair & Resume)
+
+Submit incomplete data — the agent halts and lists exactly what's missing.
 
 ```
-Process loan application SBL-2025-00204.
+Process loan application SBL-2026-10005.
 
 Business: Mesa Verde Landscaping
 Financials: $620K revenue, requesting $120K for 36 months
 ```
 
-Expected: Agent extracts partial data, `UnderwritingAgent` halts because required fields are missing (owner name, contact, industry details). The error message lists exactly which fields are missing.
+**Expected:** Agent extracts partial data, UnderwritingAgent halts due to missing required fields.
 
-**To resume after adding the missing data:**
+**Resume after providing the missing info:**
 
 ```
-Resume SBL-2025-00204. Owner is Taylor Brooks, taylor@mesaverdeland.com, 555-0204.
-Industry: landscaping and grounds maintenance, 6 years in business, 11 employees.
+Resume SBL-2026-10005. Owner is Taylor Brooks, taylor@mesaverdeland.com, 555-0204.
+Industry: landscaping and grounds maintenance (NAICS 561730), 6 years in business, 11 employees.
+Address: 800 Desert Rd, Tucson AZ 85701.
 Net profit $48K, no existing debt. Collateral: landscaping equipment $90K.
 ```
 
----
-
-### Scenario 5 — Status Check
-
-After any application has been submitted, check its status in a new session:
-
-```
-What is the status of loan application SBL-2025-00201?
-```
-
----
-
-### Scenario 6 — Rejection (Ineligible)
-
-```
-Process loan application SBL-2025-00205.
-
-Business: Coastal Events Pop-Up LLC
-Owner: Riley Chen, riley@coastalevents.com, 555-0205
-Industry: Event planning, 8 months in business, 2 employees
-Financials: $85K annual revenue, $3K net profit, $40K existing business credit card debt
-Loan: $250,000 for 60 months for venue deposits and equipment rental fleet
-Collateral: None offered
-```
-
-Expected: Ineligible — operating history too short, loan-to-revenue ratio exceeds policy limit, insufficient collateral. Agent generates a decline decision letter.
+**Expected:** Agent resumes from the failed step, completes underwriting and pricing.
 
 ---
 
@@ -189,18 +262,18 @@ uv run uvicorn server:app --host 0.0.0.0 --port 8080
 curl http://localhost:8080/health
 
 # Submit a loan application
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8080/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{
       "role": "user",
-      "content": "Process loan application SBL-2025-00201. Business: Sunrise Bakehouse LLC. Owner: Morgan Ellis, morgan@sunrisebakehouse.com, 555-0201. Industry: retail bakery, 5 years, 14 employees. Financials: $980K revenue, $62K net profit, no debt. Loan: $180K for 60 months for oven purchase. Collateral: baking equipment $140K."
+      "content": "Process loan application SBL-2026-10001. Business: Sunrise Bakehouse LLC. Owner: Morgan Ellis, morgan@sunrisebakehouse.com, 555-0201. Retail bakery, 5 years, 14 employees. Annual revenue $980K, net profit $62K, no debt. Requesting $180K for 60 months for oven purchase. Collateral: baking equipment $140K."
     }],
     "model": "loan-agent"
   }'
 
 # Approve using the session_id from the previous response
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8080/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [{"role": "user", "content": "yes"}],
@@ -213,113 +286,101 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ## D. Deployed on RHOAI (AgentSandbox + OpenShell)
 
-The agent is deployed on Red Hat OpenShift AI as an `agents.x-k8s.io/v1beta1 Sandbox` resource with OpenShell network enforcement. All infrastructure is GitOps-managed — no manual `oc apply` required.
+The agent runs on Red Hat OpenShift AI as an `agents.x-k8s.io/v1beta1 Sandbox` resource with OpenShell network enforcement. All infrastructure is GitOps-managed via ArgoCD — no manual `oc apply` required.
 
 ### Repos
 
 | Repo | Contents |
 |---|---|
-| `rrbanda/mortgage` | Agent source code, `Containerfile`, `server.py` |
-| `rrbanda/ai-demos` | Kubernetes manifests — `agents/loan-agent/` |
-| `rrbanda/ai-platforms` | ArgoCD Applications, AppProjects, AutoRAG |
+| `rrbanda/mortgage` | Agent source code, `Containerfile`, `server.py`, `skills/` |
+| `rrbanda/ai-platforms` | ArgoCD Applications, AppProjects, all Kubernetes manifests for loan-agent |
 
 ### Architecture on Cluster
 
 ```
-AgentHive (Open WebUI)
-  └── /v1/chat/completions  ──►  loan-agent Pod (AgentSandbox)
-                                   ├── OpenShell supervisor (network enforcement)
-                                   ├── MaaS → Gemini 2.5 Flash
-                                   ├── AutoRAG (OGX) → eligibility rules RAG
-                                   └── SQLite state → PVC
+Open WebUI (AgentHive)
+  └── /chat/completions  ──►  loan-agent Pod (AgentSandbox)
+                                ├── OpenShell supervisor (network enforcement)
+                                ├── MaaS → Gemini 2.5 Flash
+                                ├── AutoRAG (OGX) → 9-domain regulatory corpus
+                                │     └── Milvus vector store (nomic-embed-text-v1.5)
+                                ├── Skills (SKILL.md artifacts in skills/)
+                                └── SQLite state → PVC (/app/data/state.db)
 ```
 
-### AutoRAG: Live Eligibility Rule Retrieval
+### Quick API Tests (Cluster)
 
-The UnderwritingAgent retrieves loan eligibility policy from a live vector store rather than a static file. This makes the demo illustrate **Retrieval-Augmented Generation (RAG) in a production AI workflow** — the model only sees the rules most relevant to each specific application.
+```bash
+BASE=https://loan-agent-loan-agent.apps.ocp.qn6c5.sandbox1388.opentlc.com
 
-**Why AutoRAG instead of a static file?**
+# Health
+curl $BASE/health
 
-A static `eligibility_rules.json` works fine locally, but it has two weaknesses: the entire rule set is injected into every prompt (wasting context), and policy updates require a new code deployment. With AutoRAG the agent queries only the rules that match the current application's profile (revenue, operating history, loan-to-revenue ratio, industry), and policy updates are a re-seed operation with no code change.
+# Agent card (A2A discovery — lists all 10 capabilities)
+curl $BASE/.well-known/agent-card.json | python3 -m json.tool | head -30
 
-**How it works — the retrieval chain:**
-
-```
-UnderwritingAgent (LLM)
-  └── calls retrieve_eligibility_rules(query)
-        └── POST /v1/vector_stores/{vs_id}/search   ← OGX AutoRAG API
-              └── Milvus vector store
-                    └── chunked & embedded eligibility_rules.json
-```
-
-1. Before running the eligibility check, the UnderwritingAgent LLM calls the `retrieve_eligibility_rules` tool with a query built from key application facts (e.g. "loan to revenue ratio 294%, 8 months operating history, no collateral").
-2. The tool POSTs to the OGX AutoRAG search endpoint; OGX embeds the query and returns the top-5 most relevant policy chunks.
-3. The returned text (plain English rule descriptions) is added to the underwriting context alongside the extracted application data.
-4. The LLM evaluates the application against the retrieved rules and returns a structured `UnderwritingReport`.
-
-**What's in the vector store?**
-
-The vector store is seeded once from `sub_agents/underwriting/eligibility_rules.json`, which contains five core lending policy rules: minimum operating history, max loan-to-revenue ratio, revenue-band thresholds, high-risk industry flagging, and data consistency checks. Each rule is converted to a readable markdown section by `tools/seed_autorag.py` before embedding — raw JSON embeds poorly because the numbers lack semantic context.
-
-Example of one embedded chunk (rule\_004):
-
-```
-## rule_004: Reject if loan-to-revenue ratio exceeds 75%
-**Decision**: REJECT
-
-**Conditions**:
-- min loan to revenue ratio: 75%
+# Status check
+curl -s -X POST $BASE/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "What is the status of loan application SBL-2026-00201?"}], "model": "loan-agent"}'
 ```
 
-For the Scenario 6 application (Coastal Events, 8 months operating, 294% LTR), the query `"8 months operating history, loan-to-revenue ratio 294%, no collateral, event planning"` retrieves rule\_003 and rule\_004 as the top hits — exactly the rules that produce the INELIGIBLE decision. The model only sees the two relevant rules, not the full rule set.
+### AutoRAG: Multi-Point Regulatory Knowledge Retrieval
 
-**Verified working on the demo cluster:**
+The agent makes up to **3 targeted AutoRAG queries** per loan run — pulling only the most relevant policy chunks for each application's specific profile.
 
-The seed script was run against the OGX instance in the `autorag` namespace. Smoke-test output (cluster URL and IDs omitted):
+| Query | Agent | What it retrieves |
+|---|---|---|
+| Eligibility rules | UnderwritingAgent | Operating history, DSCR, loan-to-revenue, collateral thresholds |
+| Industry risk | UnderwritingAgent | NAICS-specific risk flags, prohibited codes (13 CFR § 120.110) |
+| ECOA guidance | LoanDecisionAgent | Adverse action notice requirements, 12 CFR § 1002.9 decline reason codes |
 
+**Corpus (9 documents, ~78KB of actual regulatory text):**
+
+| Domain | Source |
+|---|---|
+| SBA general eligibility + DSCR | SBA SOP 50 10 v8.1 |
+| Collateral requirements + LTV table | SBA SOP 50 10 v8.1 |
+| Prohibited business types | 13 CFR § 120.110 (Cornell LII) |
+| Adverse action notice requirements | 12 CFR § 1002.9 + Regulation B (Cornell LII) |
+| Prohibited NAICS codes (30 codes) | SBA/CFR cross-reference |
+| Industry risk assessment guide | Cymbal Bank policy |
+| Risk tier + rate guide (Tier 1–4) | Cymbal Bank pricing policy |
+| Applicant FAQ (20 Q&A) | Cymbal Bank counseling program |
+| Reapplication guidance | SBA Resource Partner Network |
+
+**Current vector store:** `vs_23c69157-2907-4576-8fe0-dc491de89d14`
+
+**Re-seeding after corpus updates:**
+
+```bash
+# Run from mortgage/ after updating tools/corpus/**/*.md
+AUTORAG_BASE_URL=http://autorag-ogx-service.autorag.svc.cluster.local:8321 \
+  python3 tools/seed_autorag.py
+# Copy the printed vector_store_id into ai-platforms sandbox.yaml and commit.
 ```
-Connecting to OGX …
-  OGX status: ok
-  Converted 5 eligibility rules to markdown (1 247 chars)
-Uploading eligibility rules file …
-  file_id: file-…
-Creating vector store …
-  vector_store_id: vs_…
-Adding file to vector store (embedding …) …
-  ingestion status: in_progress (attempt 1)
-  ingestion status: completed (attempt 3)
 
-Smoke-testing retrieval …
-  'annual revenue loan to revenue ratio approval' → 2 hit(s)
-    score=0.812  '## rule_001: Approve if annual revenue exceeds $500K and bu'
-    score=0.774  '## rule_004: Reject if loan-to-revenue ratio exceeds 75%'
-  'high risk industry cannabis gambling' → 2 hit(s)
-    score=0.891  '## rule_005: Review if industry is in high-risk category'
-    score=0.743  '## rule_002: Review if revenue is between $200K-$500K with 2'
-  'years in business minimum requirement' → 2 hit(s)
-    score=0.867  '## rule_003: Reject if business has less than 1 year of oper'
-    score=0.821  '## rule_001: Approve if annual revenue exceeds $500K and bu'
-
-✅  Done. Add to your config:
-    AUTORAG_VECTOR_STORE_ID=vs_…
-```
-
-The embedding model is `nomic-embed-text-v1.5` (served by OGX from Milvus).
+The ArgoCD PostSync hook Job (`seed-loan-knowledge-base`) re-seeds automatically on each ArgoCD sync when the corpus changes.
 
 **Local fallback (no AutoRAG required):**
 
-When `AUTORAG_BASE_URL` is not set (local dev with `GOOGLE_API_KEY`), the agent loads the full `eligibility_rules.json` into session state instead. The underwriting prompt adapts automatically — no code change needed to switch modes. `config.using_autorag()` returns `True` only when both `AUTORAG_BASE_URL` and `AUTORAG_VECTOR_STORE_ID` are set.
+When `AUTORAG_BASE_URL` is not set, the agent uses a static `eligibility_rules.json` fallback. No code change needed — `config.using_autorag()` returns `True` only when both env vars are set.
 
-**Re-seeding after policy changes:**
+### ADK Skills on Cluster
 
-```bash
-# Run from mortgage/ after updating eligibility_rules.json
-AUTORAG_BASE_URL=<your-cluster-autorag-url> \
-  uv run python3 tools/seed_autorag.py
-# Copy the printed vector_store_id into the loan-agent ConfigMap and redeploy.
+Skills are loaded from `skills/` in the container image. The orchestrator calls `load_skill(name)` at defined checkpoints — the LLM reads the full `SKILL.md` body and uses it to guide its next actions.
+
+**Verified skill loading sequence (from pod logs):**
+
 ```
+# ELIGIBLE path
+Tool sequence: check_process_status -> load_skill -> DocumentExtractionAgent
+               -> UnderwritingAgent -> load_skill -> PricingAgent
 
----
+# INELIGIBLE path
+Tool sequence: check_process_status -> load_skill -> DocumentExtractionAgent
+               -> UnderwritingAgent -> load_skill -> LoanDecisionAgent
+```
 
 ### Secrets (all SealedSecrets — no plaintext in git)
 
@@ -328,31 +389,6 @@ AUTORAG_BASE_URL=<your-cluster-autorag-url> \
 | `loan-agent-auth` | MaaS API key (`llm-api-key`) |
 | `openshell-client-tls` | OpenShell gateway TLS (`ca.crt`, `tls.crt`, `tls.key`) |
 
-### Testing via AgentHive
-
-1. Open `https://agenthive.<your-cluster-domain>`
-2. Select **loan-agent** in the model dropdown
-3. Paste any prompt from Section B
-
-### Testing via API
-
-```bash
-# Against the cluster Route
-BASE=https://loan-agent-loan-agent.<your-cluster-domain>
-
-curl $BASE/health
-
-curl -X POST $BASE/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{
-      "role": "user",
-      "content": "Process loan application SBL-2025-00201. Business: Sunrise Bakehouse LLC. Owner: Morgan Ellis, 555-0201. Retail bakery, 5 years, $980K revenue, $62K profit. Requesting $180K for 60 months. Collateral: baking equipment $140K."
-    }],
-    "model": "loan-agent"
-  }'
-```
-
 ### Building and Pushing a New Image
 
 ```bash
@@ -360,8 +396,7 @@ cd mortgage
 
 podman build --platform linux/amd64 -t small-business-loan-agent:latest -f Containerfile .
 
-# Re-tag before every push (required — tag must match the new build)
-REGISTRY=<your-openshift-registry-route>
+REGISTRY=default-route-openshift-image-registry.apps.ocp.qn6c5.sandbox1388.opentlc.com
 podman tag small-business-loan-agent:latest $REGISTRY/loan-agent/small-business-loan-agent:latest
 podman push $REGISTRY/loan-agent/small-business-loan-agent:latest
 ```
@@ -380,17 +415,18 @@ Then delete the running pod — `imagePullPolicy: Always` pulls the new image on
 | `MODEL_NAME` | `gemini-2.5-flash` | Model for all agents |
 | `STATE_DB_PATH` | `./mortgage_agent_state.db` | SQLite state file |
 
-### RHOAI Cluster (set in `sandbox.yaml`)
+### RHOAI Cluster (set in `ai-platforms` `sandbox.yaml`)
 
 | Variable | Value | Description |
 |---|---|---|
-| `MAAS_BASE_URL` | cluster URL | Red Hat MaaS endpoint |
+| `MAAS_BASE_URL` | `https://maas.apps.ocp.qn6c5.sandbox1388.opentlc.com` | Red Hat MaaS endpoint |
 | `MAAS_API_KEY` | from SealedSecret | MaaS API key |
 | `MODEL_NAME` | `gemini-2.5-flash` | Model backend |
-| `AUTORAG_BASE_URL` | cluster URL | OGX AutoRAG endpoint |
-| `AUTORAG_VECTOR_STORE_ID` | `vs_...` | Seeded eligibility rules store |
+| `AUTORAG_BASE_URL` | `http://autorag-ogx-service.autorag.svc.cluster.local:8321` | OGX AutoRAG endpoint |
+| `AUTORAG_VECTOR_STORE_ID` | `vs_23c69157-2907-4576-8fe0-dc491de89d14` | Seeded regulatory knowledge store |
 | `STATE_DB_PATH` | `/app/data/state.db` | SQLite on PVC |
 | `AGENT_NAME` | `loan-agent` | Model ID shown in Open WebUI |
+| `AGENT_HOST` | `loan-agent-loan-agent.apps.ocp.qn6c5.sandbox1388.opentlc.com` | For A2A agent card |
 | `BANK_NAME` | `Cymbal Bank` | Bank name in agent prompts |
 
 ---
@@ -398,7 +434,8 @@ Then delete the running pod — `imagePullPolicy: Always` pulls the new image on
 ## F. Customization
 
 - **Prompts:** Each sub-agent has a `prompt.py`. Modify to change agent behavior or bank name references.
-- **Eligibility rules:** Edit `sub_agents/underwriting/eligibility_rules.json` (or re-seed AutoRAG after changes).
+- **Skills:** Edit `skills/*/SKILL.md` to update policy guidance without a code change or image rebuild.
+- **Corpus:** Add/edit `.md` files under `tools/corpus/` and re-seed AutoRAG.
 - **Mock data:** Replace `MOCK_INTERNAL_RECORDS` in `sub_agents/underwriting/tools.py` with real CRM/API calls.
 - **Pricing:** Replace `_determine_risk_tier` in `sub_agents/pricing/tools.py` with your pricing engine.
 
