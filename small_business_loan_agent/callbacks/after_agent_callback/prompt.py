@@ -35,12 +35,17 @@ The Small Business Loan Agent has 4 sub-agents called in sequence:
 VALID patterns:
 - New eligible process: check_process_status -> load_skill("loan-orchestration-protocol") -> DocumentExtractionAgent -> UnderwritingAgent -> load_skill("loan-pricing-guide") -> PricingAgent -> STOP (ask for approval)
 - New eligible process (no skills): check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> PricingAgent -> STOP (ask for approval)
-- After user approval ("yes"): LoanDecisionAgent
+- After user approval ("yes"): check_process_status -> LoanDecisionAgent (check_process_status may be omitted)
 - INELIGIBLE decline: check_process_status -> load_skill("loan-orchestration-protocol") -> DocumentExtractionAgent -> UnderwritingAgent -> load_skill("loan-adverse-action") -> LoanDecisionAgent (PricingAgent SKIPPED — correct; no approval needed)
 - INELIGIBLE decline (no skills): check_process_status -> DocumentExtractionAgent -> UnderwritingAgent -> LoanDecisionAgent
 - Status check only: check_process_status alone
 - Resume after repair: check_process_status -> [skip completed] -> continue from next step
 - Skill loading at any point: list_skills, load_skill, load_skill_resource — valid before, after, or between any step; do NOT flag these as invalid
+
+IMPORTANT — REVIEW loans:
+REVIEW loans (eligibility_status == "REVIEW") follow the SAME trajectory as ELIGIBLE loans:
+they DO proceed through PricingAgent and DO stop to ask for human approval before LoanDecisionAgent.
+PricingAgent_output being present for a REVIEW loan is CORRECT, not a violation.
 
 INVALID patterns:
 - Missing check_process_status at the start of a new request

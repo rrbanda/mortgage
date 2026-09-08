@@ -52,7 +52,8 @@ def determine_process_action(process_state: dict) -> dict:
         "action": action,
         "overall_status": overall_status,
         "current_step": current_step,
-        "next_step_to_execute": next_step,
+        # Null for pending_approval — LoanDecisionAgent requires explicit user consent
+        "next_step_to_execute": None if action == "pending_approval" else next_step,
         "completed_steps": list(completed_steps.keys()),
         "message": message,
     }

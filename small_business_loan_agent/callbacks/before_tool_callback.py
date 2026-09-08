@@ -33,6 +33,10 @@ logger = get_logger(__name__)
 def determine_halt_action(tool_name: str, overall_status: str | None, issues: list) -> dict | None:
     """Determine whether a tool execution should be halted (pure function)."""
     if overall_status == ProcessStateService.OVERALL_STATUS_PENDING_APPROVAL:
+        # LoanDecisionAgent is the correct agent to call when the human approves/declines.
+        # All other agents are blocked — they must not run without explicit approval.
+        if tool_name == "LoanDecisionAgent":
+            return None
         issue_desc = "Unknown issue"
         for issue in issues:
             if not issue.get("resolved", False):

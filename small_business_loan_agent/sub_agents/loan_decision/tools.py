@@ -18,8 +18,23 @@ from google.adk.tools.tool_context import ToolContext
 from small_business_loan_agent import config
 from small_business_loan_agent.shared_libraries.logging_config import get_logger
 from small_business_loan_agent.shared_libraries.rag_tools import retrieve_regulatory_guidance
+from small_business_loan_agent.shared_libraries.state_utils.state_service import ProcessStateService
 
 logger = get_logger(__name__)
+
+
+def _load_step_data_from_db(loan_request_id: str, step_name: str):
+    """Load a completed step's data from SQLite (fallback for cross-turn sessions)."""
+    try:
+        state_service = ProcessStateService()
+        process_state = state_service.get_process_status(loan_request_id)
+        if not process_state:
+            return None
+        step = process_state.get("steps", {}).get(step_name, {})
+        return step.get("data")
+    except Exception as e:
+        logger.warning(f"Could not load {step_name} from DB for {loan_request_id}: {e}")
+        return None
 
 
 def finalize_loan_decision(tool_context: ToolContext) -> dict:
@@ -35,6 +50,24 @@ def finalize_loan_decision(tool_context: ToolContext) -> dict:
         application_data = tool_context.state.get("DocumentExtractionAgent_output") or {}
         underwriting_data = tool_context.state.get("UnderwritingAgent_output") or {}
         pricing_data = tool_context.state.get("PricingAgent_output")
+
+        # Fresh-session cross-turn approval: session state has no agent outputs.
+        # Load from SQLite so LoanDecisionAgent can finalize without re-running the pipeline.
+        if loan_request_id and not application_data:
+            db_data = _load_step_data_from_db(loan_request_id, "DocumentExtractionAgent")
+            if db_data:
+                application_data = db_data
+                logger.info("Loaded DocumentExtractionAgent output from DB (cross-turn)")
+        if loan_request_id and not underwriting_data:
+            db_data = _load_step_data_from_db(loan_request_id, "UnderwritingAgent")
+            if db_data:
+                underwriting_data = db_data
+                logger.info("Loaded UnderwritingAgent output from DB (cross-turn)")
+        if loan_request_id and not pricing_data:
+            db_data = _load_step_data_from_db(loan_request_id, "PricingAgent")
+            if db_data:
+                pricing_data = db_data
+                logger.info("Loaded PricingAgent output from DB (cross-turn)")
 
         if not loan_request_id:
             return {"status": "error", "message": "loan_request_id not found in session state"}

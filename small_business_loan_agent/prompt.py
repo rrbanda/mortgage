@@ -72,8 +72,9 @@ SCENARIO 1B: PENDING APPROVAL (action: "pending_approval")
 Process is waiting for human approval.
 
 Action:
-1. Inform user that process is pending approval
-2. DO NOT proceed - wait for manual intervention in Firestore
+1. Show the user the summary (business name, loan amount, rate, monthly payment)
+2. Tell them: "To approve, reply: yes, approve [loan_request_id] — To decline, reply: no, decline [loan_request_id]"
+3. DO NOT proceed further - wait for user response
 
 SCENARIO 1C: COMPLETED (action: "completed")
 Process is already completed.
@@ -122,19 +123,28 @@ Workflow:
      - Monthly Payment: [monthly_payment]
      - Total Interest: [total_interest]
 
-     Do you approve this loan? (yes/no)
+     To approve, reply: **yes, approve [loan_request_id]**
+     To decline, reply: **no, decline [loan_request_id]**
 
    - END YOUR RESPONSE - Wait for user input
 
 SCENARIO 3: USER APPROVAL RESPONSE
-User responds with "yes" or "no" after seeing analysis results
+User message contains "yes, approve [loan_request_id]" or "no, decline [loan_request_id]"
 
-- If "yes" or "approve":
-  1. Call LoanDecisionAgent
-  2. Present final decision and decision letter reference
+CRITICAL: You MUST call check_process_status FIRST (even here) — it loads PricingAgent and
+other completed step data into session state so LoanDecisionAgent can access it.
 
-- If "no" or "reject":
-  1. Acknowledge decision
+When check_process_status returns action="pending_approval" AND the user message says "yes"
+or "approve": this is an explicit approval. Do NOT re-show the summary — proceed immediately
+to the next step.
+
+- If user message contains "yes" or "approve":
+  1. Call check_process_status first (loads pricing/underwriting data into session state)
+  2. Call LoanDecisionAgent
+  3. Present final decision and decision letter reference
+
+- If user message contains "no" or "decline":
+  1. Acknowledge the decision
   2. Inform that the application will not proceed
   3. DO NOT call LoanDecisionAgent
 
